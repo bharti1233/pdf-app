@@ -126,8 +126,7 @@ class PdfOcrProcessor(private val context: Context) {
         internal fun averageWordConfidence(words: List<OcrWord>): Float =
             if (words.isEmpty()) 0f else words.map { it.confidence }.average().toFloat()
     }
-    }
-    
+
     /**
      * Extract text from a PDF using OCR.
      * Useful for scanned PDFs that don't have embedded text.
