@@ -1,0 +1,1126 @@
+package com.hmx.toolkit.ui.screens
+import com.hmx.toolkit.util.safeLaunch
+
+import com.hmx.toolkit.R
+
+import androidx.compose.ui.res.stringResource
+
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.ParcelFileDescriptor
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.content.FileProvider
+import com.hmx.toolkit.BuildConfig
+import com.hmx.toolkit.scan.SmartDocScanner
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.rememberAsyncImagePainter
+import com.hmx.toolkit.domain.operations.*
+import com.hmx.toolkit.util.CropHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.concurrent.Executors
+
+/**
+ * ViewModel for Scan to PDF Screen.
+ */
+class ScanToPdfViewModel : ViewModel() {
+    private val _state = MutableStateFlow(ScanToPdfUiState())
+    val state: StateFlow<ScanToPdfUiState> = _state.asStateFlow()
+    
+    fun addImage(uri: Uri) {
+        val updatedImages = _state.value.selectedImages + uri
+        _state.value = _state.value.copy(selectedImages = updatedImages)
+    }
+    
+    fun removeImage(index: Int) {
+        val updatedImages = _state.value.selectedImages.toMutableList()
+        if (index in updatedImages.indices) {
+            updatedImages.removeAt(index)
+            _state.value = _state.value.copy(selectedImages = updatedImages)
+        }
+    }
+    
+    fun clearImages() {
+        _state.value = _state.value.copy(selectedImages = emptyList())
+    }
+    
+    fun setPageSize(size: ScanPageSize) {
+        _state.value = _state.value.copy(pageSize = size)
+    }
+    
+    fun setColorMode(mode: ScanColorMode) {
+        _state.value = _state.value.copy(colorMode = mode)
+    }
+    
+    fun setQuality(quality: ScanQuality) {
+        _state.value = _state.value.copy(quality = quality)
+    }
+    
+    fun toggleEnhanceContrast() {
+        _state.value = _state.value.copy(enhanceContrast = !_state.value.enhanceContrast)
+    }
+
+    fun setContrastStrength(strength: Float) {
+        _state.value = _state.value.copy(contrastStrength = strength.coerceIn(1.0f, 2.0f))
+    }
+
+    fun setBwAutoThreshold(auto: Boolean) {
+        _state.value = _state.value.copy(bwAutoThreshold = auto)
+    }
+
+    fun setBwThreshold(threshold: Int) {
+        _state.value = _state.value.copy(bwThreshold = threshold.coerceIn(0, 255))
+    }
+    
+    fun setShowCamera(show: Boolean) {
+        _state.value = _state.value.copy(showCamera = show)
+    }
+
+    /**
+     * Restore last-used tool settings (#122). Marks settingsRestored so the
+     * UI save-effect doesn't overwrite stored values with defaults first.
+     */
+    fun restoreSettings(context: android.content.Context) {
+        viewModelScope.launch {
+            val store = com.hmx.toolkit.util.ToolSettingsStore
+            val pageSize = store.loadString(context, "scan", "pageSize")
+                ?.let { runCatching { ScanPageSize.valueOf(it) }.getOrNull() }
+                ?: _state.value.pageSize
+            val colorMode = store.loadString(context, "scan", "colorMode")
+                ?.let { runCatching { ScanColorMode.valueOf(it) }.getOrNull() }
+                ?: _state.value.colorMode
+            val quality = store.loadString(context, "scan", "quality")
+                ?.let { runCatching { ScanQuality.valueOf(it) }.getOrNull() }
+                ?: _state.value.quality
+            val enhanceContrast = store.loadBoolean(context, "scan", "enhanceContrast")
+                ?: _state.value.enhanceContrast
+            val contrastStrength = store.loadString(context, "scan", "contrastStrength")
+                ?.toFloatOrNull()?.coerceIn(1.0f, 2.0f)
+                ?: _state.value.contrastStrength
+            val bwAutoThreshold = store.loadBoolean(context, "scan", "bwAutoThreshold")
+                ?: _state.value.bwAutoThreshold
+            val bwThreshold = store.loadString(context, "scan", "bwThreshold")
+                ?.toIntOrNull()?.coerceIn(0, 255)
+                ?: _state.value.bwThreshold
+            _state.value = _state.value.copy(
+                pageSize = pageSize,
+                colorMode = colorMode,
+                quality = quality,
+                enhanceContrast = enhanceContrast,
+                contrastStrength = contrastStrength,
+                bwAutoThreshold = bwAutoThreshold,
+                bwThreshold = bwThreshold,
+                settingsRestored = true
+            )
+        }
+    }
+
+    fun persistSettings(context: android.content.Context) {
+        val s = _state.value
+        if (!s.settingsRestored) return
+        viewModelScope.launch {
+            val store = com.hmx.toolkit.util.ToolSettingsStore
+            store.saveString(context, "scan", "pageSize", s.pageSize.name)
+            store.saveString(context, "scan", "colorMode", s.colorMode.name)
+            store.saveString(context, "scan", "quality", s.quality.name)
+            store.saveBoolean(context, "scan", "enhanceContrast", s.enhanceContrast)
+            store.saveString(context, "scan", "contrastStrength", s.contrastStrength.toString())
+            store.saveBoolean(context, "scan", "bwAutoThreshold", s.bwAutoThreshold)
+            store.saveString(context, "scan", "bwThreshold", s.bwThreshold.toString())
+        }
+    }
+    
+    fun replaceImage(index: Int, newUri: Uri) {
+        val updatedImages = _state.value.selectedImages.toMutableList()
+        if (index in updatedImages.indices) {
+            updatedImages[index] = newUri
+            _state.value = _state.value.copy(selectedImages = updatedImages)
+        }
+    }
+    
+    fun createPdf(
+        context: android.content.Context,
+        outputUri: Uri
+    ) {
+        if (_state.value.selectedImages.isEmpty()) return
+        
+        if (_state.value.isProcessing) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isProcessing = true, progress = 0, error = null)
+            
+            val scanner = PdfScanner(context)
+            val config = ScanConfig(
+                pageSize = _state.value.pageSize,
+                colorMode = _state.value.colorMode,
+                quality = _state.value.quality,
+                enhanceContrast = _state.value.enhanceContrast,
+                contrastStrength = _state.value.contrastStrength,
+                bwThreshold = if (_state.value.bwAutoThreshold) null else _state.value.bwThreshold
+            )
+            
+            val result = scanner.imagesToPdf(
+                imageUris = _state.value.selectedImages,
+                outputUri = outputUri,
+                config = config,
+                progressCallback = { progress ->
+                    _state.value = _state.value.copy(progress = progress)
+                }
+            )
+            
+            if (result.success) {
+                com.hmx.toolkit.data.SafUriManager.addRecentFile(context, outputUri)
+                
+                // Record in history
+                com.hmx.toolkit.data.HistoryManager.recordSuccess(
+                    context = context,
+                    operationType = com.hmx.toolkit.data.OperationType.SCAN_TO_PDF,
+                    inputFileName = "${_state.value.selectedImages.size} images",
+                    outputFileUri = outputUri,
+                    outputFileName = "scanned.pdf",
+                    details = "Scanned ${result.pagesScanned} pages to PDF"
+                )
+            } else {
+                // Record failure in history
+                com.hmx.toolkit.data.HistoryManager.recordFailure(
+                    context = context,
+                    operationType = com.hmx.toolkit.data.OperationType.SCAN_TO_PDF,
+                    inputFileName = "${_state.value.selectedImages.size} images",
+                    errorMessage = result.errorMessage
+                )
+            }
+
+            _state.value = _state.value.copy(
+                isProcessing = false,
+                isComplete = result.success,
+                error = result.errorMessage,
+                pagesScanned = result.pagesScanned,
+                resultUri = if (result.success) outputUri else null
+            )
+        }
+    }
+    
+    fun reset() {
+        _state.value = ScanToPdfUiState()
+    }
+
+    /**
+     * Record a directly-scanned PDF (e.g. ML Kit smart scan output).
+     */
+    fun setDirectPdfResult(
+        context: android.content.Context,
+        outputUri: Uri,
+        fileName: String,
+        pages: Int
+    ) {
+        viewModelScope.launch {
+            com.hmx.toolkit.data.SafUriManager.addRecentFile(context, outputUri)
+            com.hmx.toolkit.data.HistoryManager.recordSuccess(
+                context = context,
+                operationType = com.hmx.toolkit.data.OperationType.SCAN_TO_PDF,
+                inputFileName = fileName,
+                outputFileUri = outputUri,
+                outputFileName = fileName,
+                details = "Smart-scanned $pages pages to PDF"
+            )
+            _state.value = _state.value.copy(
+                isProcessing = false,
+                isComplete = true,
+                error = null,
+                pagesScanned = pages,
+                resultUri = outputUri
+            )
+        }
+    }
+}
+
+data class ScanToPdfUiState(
+    val selectedImages: List<Uri> = emptyList(),
+    val showCamera: Boolean = false,
+    val pageSize: ScanPageSize = ScanPageSize.A4,
+    val colorMode: ScanColorMode = ScanColorMode.COLOR,
+    val quality: ScanQuality = ScanQuality.MEDIUM,
+    val enhanceContrast: Boolean = true,
+    val contrastStrength: Float = 1.2f,
+    val bwAutoThreshold: Boolean = true,
+    val bwThreshold: Int = 128,
+    val settingsRestored: Boolean = false,
+    val isProcessing: Boolean = false,
+    val progress: Int = 0,
+    val isComplete: Boolean = false,
+    val error: String? = null,
+    val pagesScanned: Int = 0,
+    val resultUri: Uri? = null
+)
+
+/**
+ * Scan to PDF Screen - Capture photos and convert to PDF.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ScanToPdfScreen(
+    onNavigateBack: () -> Unit,
+    viewModel: ScanToPdfViewModel = viewModel()
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val state by viewModel.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+        if (granted) {
+            viewModel.setShowCamera(true)
+        }
+    }
+    
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        uris.forEach { uri -> viewModel.addImage(uri) }
+    }
+    
+    val saveDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        uri?.let { viewModel.createPdf(context, it) }
+    }
+
+    // Remember last-used settings across app restarts (#122).
+    LaunchedEffect(Unit) {
+        viewModel.restoreSettings(context)
+    }
+    LaunchedEffect(
+        state.pageSize, state.colorMode, state.quality,
+        state.enhanceContrast, state.contrastStrength,
+        state.bwAutoThreshold, state.bwThreshold
+    ) {
+        viewModel.persistSettings(context)
+    }
+
+    // ---- ML Kit smart document scan (Play Store flavor only) ----
+    var smartScanError by remember { mutableStateOf<String?>(null) }
+    val smartScanLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val pdfUri = SmartDocScanner.parsePdfUri(result.data)
+            if (pdfUri != null) {
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val dest = File(context.cacheDir, "smartscan_${System.currentTimeMillis()}.pdf")
+                        context.contentResolver.openInputStream(pdfUri)?.use { input ->
+                            dest.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        var pages = 0
+                        try {
+                            ParcelFileDescriptor.open(dest, ParcelFileDescriptor.MODE_READ_ONLY)?.use { pfd ->
+                                PdfRenderer(pfd).use { renderer -> pages = renderer.pageCount }
+                            }
+                        } catch (e: Exception) { }
+                        val contentUri = FileProvider.getUriForFile(
+                            context, "${context.packageName}.provider", dest
+                        )
+                        // Grant ourselves durable read via FileProvider; record + show result
+                        viewModel.setDirectPdfResult(
+                            context.applicationContext, contentUri, dest.name, pages
+                        )
+                    } catch (e: Exception) {
+                        smartScanError = e.localizedMessage ?: "Smart scan failed"
+                    }
+                }
+            } else {
+                smartScanError = "Smart scan returned no document"
+            }
+        }
+    }
+
+    fun launchSmartScan() {
+        val activity = context.findScanActivity()
+        if (activity == null) {
+            smartScanError = "Unable to start scanner"
+            return
+        }
+        SmartDocScanner.startScan(
+            activity = activity,
+            onLaunch = { intentSender ->
+                smartScanLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+            },
+            onError = { e -> smartScanError = e.localizedMessage ?: "Smart scan unavailable" }
+        )
+    }
+
+    val saveCopyLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        val resultUri = state.resultUri
+        if (uri != null && resultUri != null) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    context.contentResolver.openInputStream(resultUri)?.use { input ->
+                        context.contentResolver.openOutputStream(uri)?.use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    fun shareResultPdf() {
+        val resultUri = state.resultUri ?: return
+        try {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, resultUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Share Scanned PDF"))
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // First-page preview of the finished PDF
+    var resultPreview by remember(state.resultUri) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(state.resultUri) {
+        val uri = state.resultUri
+        if (uri != null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        PdfRenderer(pfd).use { renderer ->
+                            if (renderer.pageCount > 0) {
+                                renderer.openPage(0).use { page ->
+                                    // Cap preview size: full-res page renders waste heap here.
+                                    val w = page.width.coerceIn(1, 1600)
+                                    val h = (page.height.toFloat() * (w.toFloat() / page.width.coerceAtLeast(1).toFloat()))
+                                        .toInt().coerceIn(1, 1600)
+                                    val bmp = Bitmap.createBitmap(
+                                        w, h, Bitmap.Config.ARGB_8888
+                                    )
+                                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    resultPreview?.let { old ->
+                                        if (!old.isRecycled) old.recycle()
+                                    }
+                                    resultPreview = bmp
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        } else {
+            resultPreview = null
+        }
+    }
+    
+    // Crop state
+    var cropImageIndex by remember { mutableStateOf(-1) }
+    
+    // Crop launcher
+    val cropLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val croppedUri = CropHelper.getResultUri(result.resultCode, result.data)
+            if (croppedUri != null && cropImageIndex >= 0 && cropImageIndex < state.selectedImages.size) {
+                viewModel.replaceImage(cropImageIndex, croppedUri)
+            }
+        }
+        cropImageIndex = -1
+    }
+    
+    if (state.showCamera && hasCameraPermission) {
+        CameraScreen(
+            onImageCaptured = { uri ->
+                viewModel.addImage(uri)
+                viewModel.setShowCamera(false)
+            },
+            onClose = { viewModel.setShowCamera(false) }
+        )
+    } else {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.tool_scan_to_pdf)) },
+                    navigationIcon = {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                        }
+                    }
+                )
+            }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Image Source Selection
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.scan_add_images),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    if (hasCameraPermission) {
+                                        viewModel.setShowCamera(true)
+                                    } else {
+                                        permissionLauncher.safeLaunch(Manifest.permission.CAMERA, context)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.scan_camera))
+                            }
+                            
+                            OutlinedButton(
+                                onClick = { imagePickerLauncher.safeLaunch(arrayOf("image/*"), context) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Image, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.scan_gallery))
+                            }
+                        }
+
+                        // ML Kit smart scan: auto edge detection + editable borders (Play flavor)
+                        if (BuildConfig.HAS_MLKIT_SCANNER && SmartDocScanner.isAvailable) {
+                            Button(
+                                onClick = { launchSmartScan() },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                )
+                            ) {
+                                Icon(Icons.Default.DocumentScanner, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.scan_smart_scan))
+                            }
+                            Text(
+                                text = stringResource(R.string.scan_smart_scan_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        smartScanError?.let { errorMsg ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Error,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        errorMsg,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = { smartScanError = null }) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = stringResource(R.string.action_remove)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Selected Images
+                if (state.selectedImages.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.scan_pages_count, state.selectedImages.size),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                TextButton(onClick = { viewModel.clearImages() }) {
+                                    Text(stringResource(R.string.action_clear_all))
+                                }
+                            }
+                            
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(state.selectedImages.size) { index ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(100.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                // Tap to crop
+                                                cropImageIndex = index
+                                                val cropIntent = CropHelper.getCropIntent(
+                                                    context = context,
+                                                    sourceUri = state.selectedImages[index],
+                                                    aspectRatio = null,
+                                                    maxSize = 2048
+                                                )
+                                                cropLauncher.safeLaunch(cropIntent, context)
+                                            }
+                                    ) {
+                                        Image(
+                                            painter = rememberAsyncImagePainter(state.selectedImages[index]),
+                                            contentDescription = stringResource(R.string.cd_page_number, index + 1),
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                        
+                                        // Page number badge
+                                        Badge(
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(4.dp)
+                                        ) {
+                                            Text("${index + 1}")
+                                        }
+                                        
+                                        // Crop button
+                                        IconButton(
+                                            onClick = {
+                                                cropImageIndex = index
+                                                val cropIntent = CropHelper.getCropIntent(
+                                                    context = context,
+                                                    sourceUri = state.selectedImages[index],
+                                                    aspectRatio = null,
+                                                    maxSize = 2048
+                                                )
+                                                cropLauncher.safeLaunch(cropIntent, context)
+                                            },
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .size(24.dp)
+                                                .background(
+                                                    MaterialTheme.colorScheme.primary,
+                                                    CircleShape
+                                                )
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Crop,
+                                                contentDescription = stringResource(R.string.action_crop),
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                        
+                                        // Delete button
+                                        IconButton(
+                                            onClick = { viewModel.removeImage(index) },
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .size(24.dp)
+                                                .background(
+                                                    MaterialTheme.colorScheme.error,
+                                                    CircleShape
+                                                )
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = stringResource(R.string.action_remove),
+                                                tint = MaterialTheme.colorScheme.onError,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Scan Settings
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.action_settings),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        
+                        // Page Size
+                        Text(stringResource(R.string.scan_page_size), style = MaterialTheme.typography.bodyMedium)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(ScanPageSize.entries) { size ->
+                                FilterChip(
+                                    selected = state.pageSize == size,
+                                    onClick = { viewModel.setPageSize(size) },
+                                    label = { Text(size.displayName.split(" ").first()) }
+                                )
+                            }
+                        }
+                        
+                        // Color Mode
+                        Text(stringResource(R.string.scan_color_mode), style = MaterialTheme.typography.bodyMedium)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(ScanColorMode.entries) { mode ->
+                                FilterChip(
+                                    selected = state.colorMode == mode,
+                                    onClick = { viewModel.setColorMode(mode) },
+                                    label = { Text(mode.name.replace("_", " ")) }
+                                )
+                            }
+                        }
+                        
+                        // Quality
+                        Text(stringResource(R.string.label_quality), style = MaterialTheme.typography.bodyMedium)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(ScanQuality.entries) { quality ->
+                                FilterChip(
+                                    selected = state.quality == quality,
+                                    onClick = { viewModel.setQuality(quality) },
+                                    label = { Text(quality.name) }
+                                )
+                            }
+                        }
+                        
+                        // Enhance Contrast
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(stringResource(R.string.scan_enhance_contrast), modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = state.enhanceContrast,
+                                onCheckedChange = { viewModel.toggleEnhanceContrast() }
+                            )
+                        }
+
+                        if (state.enhanceContrast) {
+                            Text(
+                                "Contrast strength: ${"%.1f".format(state.contrastStrength)}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Slider(
+                                value = state.contrastStrength,
+                                onValueChange = { viewModel.setContrastStrength(it) },
+                                valueRange = 1.0f..2.0f,
+                                steps = 9,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        if (state.colorMode == ScanColorMode.BLACK_AND_WHITE) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Auto threshold (Otsu)", modifier = Modifier.weight(1f))
+                                Switch(
+                                    checked = state.bwAutoThreshold,
+                                    onCheckedChange = { viewModel.setBwAutoThreshold(it) }
+                                )
+                            }
+                            if (!state.bwAutoThreshold) {
+                                Text(
+                                    "Threshold: ${state.bwThreshold}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Slider(
+                                    value = state.bwThreshold.toFloat(),
+                                    onValueChange = { viewModel.setBwThreshold(it.toInt()) },
+                                    valueRange = 0f..255f,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                // Processing State
+                AnimatedVisibility(visible = state.isProcessing) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(stringResource(R.string.scan_creating_pdf, state.progress))
+                            LinearProgressIndicator(
+                                progress = state.progress / 100f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+                
+                // Success State
+                AnimatedVisibility(visible = state.isComplete && !state.isProcessing) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    stringResource(R.string.scan_pdf_created),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    stringResource(R.string.scan_pages_scanned, state.pagesScanned),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                // Result preview + actions (shown after success)
+                if (state.isComplete && state.resultUri != null) {
+                    resultPreview?.takeIf { !it.isRecycled }?.let { bmp ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)
+                                    .background(androidx.compose.ui.graphics.Color.White),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                com.hmx.toolkit.util.FileOpener.openPdf(context, state.resultUri!!)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.action_open_pdf))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { shareResultPdf() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.pdf_share))
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                saveCopyLauncher.safeLaunch("scanned_${System.currentTimeMillis()}.pdf", context)
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Save, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.pdf_save))
+                        }
+                    }
+                }
+                
+                // Error State
+                state.error?.let { error ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Error,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(error, color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Create PDF Button
+                Button(
+                    onClick = {
+                        val fileName = "scanned_${System.currentTimeMillis()}.pdf"
+                        saveDocumentLauncher.safeLaunch(fileName, context)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = state.selectedImages.isNotEmpty() && !state.isProcessing
+                ) {
+                    Icon(Icons.Default.PictureAsPdf, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.scan_create_pdf))
+                }
+                
+                // Reset Button
+                if (state.isComplete) {
+                    OutlinedButton(
+                        onClick = { viewModel.reset() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.scan_more_documents))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Camera preview screen for capturing images.
+ */
+@Composable
+private fun CameraScreen(
+    onImageCaptured: (Uri) -> Unit,
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    
+    var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
+    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { ctx ->
+                PreviewView(ctx).apply {
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
+                        
+                        val preview = Preview.Builder().build().also {
+                            it.setSurfaceProvider(surfaceProvider)
+                        }
+                        
+                        imageCapture = ImageCapture.Builder()
+                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                            .build()
+                        
+                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                        
+                        try {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                cameraSelector,
+                                preview,
+                                imageCapture
+                            )
+                        } catch (e: Exception) {
+                            // Handle camera binding error
+                        }
+                    }, ContextCompat.getMainExecutor(ctx))
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+        
+        // Controls
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .padding(32.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Close button
+            FloatingActionButton(
+                onClick = onClose,
+                containerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.action_close))
+            }
+            
+            // Capture button
+            FloatingActionButton(
+                onClick = {
+                    val photoFile = File(
+                        context.cacheDir,
+                        "capture_${System.currentTimeMillis()}.jpg"
+                    )
+                    
+                    val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+                    
+                    imageCapture?.takePicture(
+                        outputOptions,
+                        cameraExecutor,
+                        object : ImageCapture.OnImageSavedCallback {
+                            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                                onImageCaptured(Uri.fromFile(photoFile))
+                            }
+                            
+                            override fun onError(exception: ImageCaptureException) {
+                                // Handle capture error
+                            }
+                        }
+                    )
+                },
+                containerColor = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(72.dp)
+            ) {
+                Icon(
+                    Icons.Default.CameraAlt,
+                    contentDescription = stringResource(R.string.cd_capture),
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+            
+            // Placeholder for symmetry
+            Spacer(modifier = Modifier.size(56.dp))
+        }
+    }
+}
+
+/**
+ * Resolve the hosting Activity from a Compose context for scanner intents.
+ */
+private fun Context.findScanActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}

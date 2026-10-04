@@ -222,7 +222,7 @@ jobs:
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJson: play-store-key.json
-          packageName: com.yourname.pdftoolkit
+          packageName: com.hmx.toolkit
           releaseFiles: app/build/outputs/bundle/playstoreRelease/*.aab
           tracks: internal
           status: completed
@@ -243,7 +243,7 @@ jobs:
           # Upload ONLY the already-signed AAB.
           # Never send keystore.jks or any signing password/alias to a third party.
           RESPONSE=$(curl -X POST \
-            "https://developer-api.indusappstore.com/devtools/aab/upgrade/com.yourname.pdftoolkit" \
+            "https://developer-api.indusappstore.com/devtools/aab/upgrade/com.hmx.toolkit" \
             -H "Authorization: ${{ secrets.INDUS_APP_STORE_KEY }}" \
             -F "file=@${AAB_FILE}" \
             -w "\n%{http_code}" \
@@ -378,7 +378,7 @@ jobs:
           echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| **App** | PDF Toolkit |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Package** | com.yourname.pdftoolkit |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Package** | com.hmx.toolkit |" >> $GITHUB_STEP_SUMMARY
           echo "| **Track** | Internal Testing |" >> $GITHUB_STEP_SUMMARY
           echo "| **Version Name** | ${{ env.APP_VERSION_NAME }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Version Code** | ${{ env.APP_VERSION_CODE }} |" >> $GITHUB_STEP_SUMMARY
