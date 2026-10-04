@@ -178,7 +178,10 @@ class PdfCompressorIsolationTest {
 
         assertTrue("impossible target must fail", result.isFailure)
         val ex = result.exceptionOrNull()
-        assertTrue(ex is TargetSizeNotReachedException)
+        if (ex !is TargetSizeNotReachedException) {
+            println("strict target-size failed unexpectedly with: $ex")
+        }
+        assertTrue("expected TargetSizeNotReachedException but was: $ex", ex is TargetSizeNotReachedException)
         val fallback = (ex as TargetSizeNotReachedException).fallbackFile
         try {
             assertTrue("fallback file must survive workspace cleanup", fallback.exists())

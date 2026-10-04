@@ -62,6 +62,9 @@ class PdfCompressorTest {
 
         outputStream.close()
 
+        if (result.isFailure) {
+            println("testCompressPdf_basic failed with: ${result.exceptionOrNull()}")
+        }
         assertTrue("Compression should succeed", result.isSuccess)
         val compressionResult = result.getOrNull()!!
 
