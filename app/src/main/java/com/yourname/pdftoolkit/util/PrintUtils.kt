@@ -30,6 +30,14 @@ object PrintUtils {
      */
     fun printPdf(context: Context, uri: Uri, documentName: String = "PDF Document"): Boolean {
         return try {
+            // Fail fast on a clearly unusable URI so callers get an accurate
+            // synchronous result instead of an async onWrite failure later.
+            try {
+                context.contentResolver.openInputStream(uri)?.use { } ?: return false
+            } catch (_: Exception) {
+                return false
+            }
+
             val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
                 ?: return false
 

@@ -28,6 +28,7 @@ class PdfRedactorTest {
     @Before
     fun setup() {
         redactor = PdfRedactor()
+        com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(RuntimeEnvironment.getApplication())
         tempDir = File(System.getProperty("java.io.tmpdir"), "pdf_redactor_test")
         if (!tempDir.exists()) tempDir.mkdirs()
     }
