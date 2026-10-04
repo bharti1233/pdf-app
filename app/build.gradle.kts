@@ -163,6 +163,14 @@ android {
         }
     }
 
+    testOptions {
+        unitTests {
+            // Required so Robolectric can see merged resources/assets
+            // (strings, pdfbox-android font AFMs from the AAR).
+            isIncludeAndroidResources = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
