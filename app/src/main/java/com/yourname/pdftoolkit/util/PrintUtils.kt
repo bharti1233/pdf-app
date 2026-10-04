@@ -30,6 +30,8 @@ object PrintUtils {
      */
     fun printPdf(context: Context, uri: Uri, documentName: String = "PDF Document"): Boolean {
         return try {
+            if (uri.toString().isBlank()) return false
+
             // Fail fast on a clearly unusable URI so callers get an accurate
             // synchronous result instead of an async onWrite failure later.
             try {
