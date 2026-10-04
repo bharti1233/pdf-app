@@ -25,7 +25,7 @@ jobs:
           bash scripts/static_analysis.sh
           
       - name: Run Android Lint
-        run: ./gradlew lintFdroidDebug --continue
+        run: chmod +x gradlew && ./gradlew lintFdroidDebug --continue
         
       - name: Upload lint report
         if: always()
@@ -56,7 +56,7 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle.kts') }}
 
       - name: Run unit tests
-        run: ./gradlew testFdroidDebugUnitTest
+        run: chmod +x gradlew && ./gradlew testFdroidDebugUnitTest
 
       - name: Upload test results
         if: always()
@@ -87,10 +87,10 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle.kts') }}
           
       - name: Build fdroid debug
-        run: ./gradlew :app:assembleFdroidDebug
+        run: chmod +x gradlew && ./gradlew :app:assembleFdroidDebug
         
       - name: Build playstore debug
-        run: ./gradlew :app:assemblePlaystoreDebug
+        run: chmod +x gradlew && ./gradlew :app:assemblePlaystoreDebug
 
   crash-free-check:
     name: Crash Pattern Check
@@ -141,6 +141,7 @@ jobs:
       - name: Build PlayStore Release (unsigned)
         run: |
           # Build without signing to verify ProGuard doesn't break anything
+          chmod +x gradlew
           ./gradlew :app:assemblePlaystoreRelease --continue
 
       - name: Verify APK Output
