@@ -137,7 +137,8 @@ class PdfRedactor {
                                 (color.b * 255).toInt()
                             ))
                         }
-                        val canvas = android.graphics.Canvas(bitmap)
+                        if (bitmap.isRecycled) throw IllegalStateException("Page bitmap recycled before redaction")
+                        val canvas = android.graphics.Canvas(bitmap) // isRecycled guarded above
                         val pageHeight = page.mediaBox.height
                         for (area in pageAreas) {
                             val left = area.rect.left * scale
