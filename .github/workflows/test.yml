@@ -147,14 +147,24 @@ jobs:
       - name: Verify APK Output
         run: |
           echo "Checking for APK output..."
-          ls -lh app/build/outputs/apk/playstore/release/ || echo "No APKs found"
-          
-      - name: Upload PlayStore Release APK
-        if: always()
+          APK_DIR=app/build/outputs/apk/playstore/release
+          ls -lh $APK_DIR || { echo "APK output directory missing: $APK_DIR"; exit 1; }
+          APK_FILE=$(find $APK_DIR -maxdepth 1 -type f -name "*.apk" | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: PlayStore release build completed, but no APK was found at the expected output location ($APK_DIR)."
+            exit 1
+          fi
+          echo "APK path: $APK_FILE"
+          echo "APK filename: $(basename $APK_FILE)"
+          echo "APK size: $(stat -c%s $APK_FILE) bytes"
+          ls -lh $APK_FILE
+
+      - name: Upload PlayStore APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: playstore-release-test-apk
+          name: pdf-toolkit-playstore-apk
           path: app/build/outputs/apk/playstore/release/*.apk
+          if-no-files-found: error
           retention-days: 5
 
   # Instrumented tests - disabled by default as they require emulator
