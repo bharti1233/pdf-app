@@ -165,6 +165,9 @@ class PdfCompressorIsolationTest {
     fun `strict target failure preserves fallback file outside workspace`() = runBlocking {
         val inputFile = File(context.cacheDir, "iso_strict_input.pdf")
         createTestPdf(inputFile)
+        // Diagnostic, not weaker: if the harness loses our input file, fail here
+        // with a clear message instead of masquerading as a contract failure below.
+        assertTrue("test input must exist after creation", inputFile.exists() && inputFile.length() > 0)
         val outputFile = File(context.cacheDir, "iso_strict_output.pdf")
         val outputStream = FileOutputStream(outputFile)
 
