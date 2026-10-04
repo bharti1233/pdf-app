@@ -110,6 +110,9 @@ class PdfCompressor {
         // ponytail: UUID suffix isolates concurrent ops sharing the same millis timestamp
         val dir = File(base, "op_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}")
         dir.mkdirs()
+        // Fail loudly: a silent mkdirs failure would surface later as a
+        // confusing FileNotFoundException far from the real cause.
+        check(dir.isDirectory) { "Cannot create compression workspace: ${dir.absolutePath}" }
         return dir
     }
 
