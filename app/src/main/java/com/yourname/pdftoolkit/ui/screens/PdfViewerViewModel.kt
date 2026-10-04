@@ -742,9 +742,12 @@ fun eraseAnnotations(pageIndex: Int, eraserPoints: List<Offset>, eraserNormWidth
                 }
             } else throw e
         }
-        searchJob = viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
-            _searchState.value = _searchState.value.copy(query = query, isLoading = true)
+        // Set query synchronously so callers/tests observe the state
+        // immediately; the background job must not emit a stale query/loading
+        // update after clearSearch() has cancelled it.
+        _searchState.value = SearchState(query = query, isLoading = true)
 
+        searchJob = viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             val matches = mutableListOf<SearchMatch>()
             val scannedPages = mutableListOf<Int>()
 
