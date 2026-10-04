@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Play Store flavor manifest.
+  URL → PDF (HtmlToPdfConverter.loadUrl(url)) needs network access, so the
+  playstore variant declares INTERNET here only. F-Droid and OpenSource
+  variants build with HAS_NETWORK_URL_TO_PDF=false and therefore do NOT
+  declare INTERNET.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+</manifest>

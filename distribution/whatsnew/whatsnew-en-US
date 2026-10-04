@@ -1,0 +1,6 @@
+• OCR now reads JPG/PNG images, not just PDFs
+• Sign once, reuse saved signatures
+• Scan to PDF: auto black-and-white threshold and contrast controls
+• N-Up imposition: Cut & Stack booklets (LTR/RTL), auto-rotate fill, page numbers
+• Tools remember your last settings
+• Stability fixes: fewer out-of-memory crashes in merge, unlock, compress and print
