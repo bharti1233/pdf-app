@@ -101,6 +101,27 @@ data class CompressionProfile(
 class PdfCompressor {
 
     /**
+     * Creates an operation-scoped workspace: compress_cache/op_<millis>_<uuid>/.
+     * Each compression owns exactly one directory; cleanup deletes only that directory.
+     */
+    internal fun newOperationDir(context: Context): File {
+        val base = File(context.cacheDir, "compress_cache")
+        if (!base.exists()) base.mkdirs()
+        // ponytail: UUID suffix isolates concurrent ops sharing the same millis timestamp
+        val dir = File(base, "op_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}")
+        dir.mkdirs()
+        return dir
+    }
+
+    internal fun cleanupOperationDir(dir: File?) {
+        try {
+            dir?.deleteRecursively()
+        } catch (_: Exception) {
+            // best-effort; never fail the operation because cleanup failed
+        }
+    }
+
+    /**
      * Quick check: does this PDF have any embedded raster images?
      * Used to decide compression strategy without loading the full document.
      */
@@ -150,15 +171,15 @@ class PdfCompressor {
         onProgress: (Float) -> Unit = {}
     ): Result<CompressionResult> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
+        var operationDir: File? = null
         var tempFile: File? = null
-        val cacheDir = File(context.cacheDir, "compress_cache")
-        if (!cacheDir.exists()) cacheDir.mkdirs()
 
         try {
             ensureActive()
             onProgress(0.05f)
 
-            tempFile = File(cacheDir, "temp_target_compress_${System.currentTimeMillis()}.pdf")
+            operationDir = newOperationDir(context)
+            tempFile = File(operationDir, "temp_target_compress.pdf")
             context.contentResolver.openInputStream(inputUri)?.use { input ->
                 FileOutputStream(tempFile).use { output ->
                     input.copyTo(output)
@@ -200,11 +221,10 @@ class PdfCompressor {
                 val currentProgress = 0.05f + 0.85f * (iterationCount.toFloat() / maxIterations)
                 onProgress(currentProgress)
 
-                val iterationFile = File(cacheDir, "iter_${iterationCount}_${System.currentTimeMillis()}.pdf")
                 val profile = profileFromSlider(mid) ?: profileFromLevel(CompressionLevel.MEDIUM)
 
                 var currentStrategy = CompressionStrategy.IMAGE_OPTIMIZATION
-                var optFile = tryImageOptimization(context, tempFile, profile, {})
+                var optFile = tryImageOptimization(context, tempFile, profile, operationDir!!, {})
 
                 val isOptInefficient = optFile != null && optFile.length() > originalSize * 0.85f
 
@@ -212,7 +232,7 @@ class PdfCompressor {
                 val shouldTryRerender = mid > 60
 
                 if (shouldTryRerender && (optFile == null || isOptInefficient)) {
-                    val rerender = tryFullRerender(context, tempFile, profile, {})
+                    val rerender = tryFullRerender(context, tempFile, profile, operationDir!!, {})
                     if (rerender != null && (optFile == null || rerender.length() < optFile.length())) {
                         optFile?.delete()
                         optFile = rerender
@@ -274,15 +294,29 @@ class PdfCompressor {
                         )
                     )
                 } else {
-                    // Let the caller handle the failure or fallback
+                    // Target not reached: preserve the smallest file OUTSIDE the
+                    // operation workspace so workspace cleanup cannot delete it.
+                    val preserved = File(
+                        operationDir?.parentFile ?: context.cacheDir,
+                        "fallback_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.pdf"
+                    )
+                    try {
+                        if (!bestFile.renameTo(preserved)) {
+                            bestFile.copyTo(preserved, overwrite = true)
+                        }
+                    } catch (_: Exception) {
+                        // If preservation fails, fall back to the in-workspace file
+                        // (cleanup below may remove it; caller must handle absence).
+                    }
+                    val fallback = if (preserved.exists()) preserved else bestFile
                     Result.failure(
                         TargetSizeNotReachedException(
                             message = "Could not reach target size. Smallest possible size is ${bestSize} bytes.",
                             smallestAchievableSize = bestSize,
-                            fallbackFile = bestFile,
+                            fallbackFile = fallback,
                             originalSize = originalSize,
                             strategyUsed = bestStrategy,
-                            pagesProcessed = countPages(bestFile)
+                            pagesProcessed = countPages(fallback)
                         )
                     )
                 }
@@ -293,13 +327,8 @@ class PdfCompressor {
         } catch (e: Exception) {
             return@withContext Result.failure(e)
         } finally {
-            tempFile?.delete()
-            // Clean up any remaining iteration files in cacheDir that start with temp_target_compress or iter_
-            cacheDir.listFiles()?.forEach { file ->
-                if (file.name.startsWith("iter_") || file.name.startsWith("temp_target_compress_")) {
-                    file.delete()
-                }
-            }
+            // Operation-scoped cleanup only: never touch sibling operations' files.
+            cleanupOperationDir(operationDir)
         }
     }
 
@@ -312,17 +341,17 @@ class PdfCompressor {
         onProgress: (Float) -> Unit = {}
     ): Result<CompressionResult> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
+        var operationDir: File? = null
         var tempFile: File? = null
         val profile = profileFromSlider(qualityPercent) ?: profileFromLevel(level)
-        
+
         try {
             ensureActive()
             onProgress(0.05f)
-            
-            // Create a temp file to avoid loading everything into memory
-            val cacheDir = File(context.cacheDir, "compress_cache")
-            if (!cacheDir.exists()) cacheDir.mkdirs()
-            tempFile = File(cacheDir, "temp_compress_${System.currentTimeMillis()}.pdf")
+
+            // Operation-scoped workspace: all temp files live under this dir.
+            operationDir = newOperationDir(context)
+            tempFile = File(operationDir, "temp_compress.pdf")
 
             // Copy URI content to temp file
             context.contentResolver.openInputStream(inputUri)?.use { input ->
@@ -354,7 +383,7 @@ class PdfCompressor {
             var resultFile: File? = null
             var strategyUsed = CompressionStrategy.IMAGE_OPTIMIZATION
 
-            val opt = tryImageOptimization(context, tempFile, profile, onProgress)
+            val opt = tryImageOptimization(context, tempFile, profile, operationDir!!, onProgress)
             
             // Smart threshold logic: if it saved less than 15%, we also consider tryFullRerender
             val isOptInefficient = opt != null && opt.length() > originalSize * 0.85f
@@ -375,7 +404,7 @@ class PdfCompressor {
                 (qualityPercent ?: 50) > 60
             if (shouldTryRerender) {
                 onProgress(0.55f)
-                val rerender = tryFullRerender(context, tempFile, profile) { p ->
+                val rerender = tryFullRerender(context, tempFile, profile, operationDir!!) { p ->
                     onProgress(0.55f + p * 0.40f)
                 }
                 
@@ -383,7 +412,7 @@ class PdfCompressor {
                     // If we have both, compare sizes and choose the smaller one!
                     if (resultFile != null) {
                         if (rerender.length() < resultFile.length()) {
-                            resultFile.delete() // clean up optimized file
+                            resultFile.delete() // clean up optimized file (same workspace)
                             resultFile = rerender
                             strategyUsed = CompressionStrategy.FULL_RERENDER
                         } else {
@@ -436,7 +465,9 @@ class PdfCompressor {
                 )
             )
         } finally {
-            tempFile?.delete()
+            // Covers success, failure, and cancellation (including a leaked
+            // resultFile when cancellation lands between the helpers).
+            cleanupOperationDir(operationDir)
         }
     }
     
@@ -504,10 +535,11 @@ class PdfCompressor {
         context: Context,
         inputFile: File,
         profile: CompressionProfile,
-        onProgress: (Float) -> Unit
+        workspace: File,
+        onProgress: (Float) -> Unit = {}
     ): File? {
         var document: PDDocument? = null
-        val outputFile = File(context.cacheDir, "opt_${System.currentTimeMillis()}.pdf")
+        val outputFile = File(workspace, "opt_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.pdf")
         
         return try {
             // Use MemoryUsageSetting to enable temp file buffering instead of full memory load
@@ -731,12 +763,13 @@ class PdfCompressor {
         context: Context,
         inputFile: File,
         profile: CompressionProfile,
-        onProgress: (Float) -> Unit
+        workspace: File,
+        onProgress: (Float) -> Unit = {}
     ): File? {
         var outputDocument: PDDocument? = null
         var androidRenderer: android.graphics.pdf.PdfRenderer? = null
         var pfd: android.os.ParcelFileDescriptor? = null
-        val outputFile = File(context.cacheDir, "rerender_${System.currentTimeMillis()}.pdf")
+        val outputFile = File(workspace, "rerender_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.pdf")
         
         return try {
             // A. Seekable File Descriptors
@@ -903,16 +936,16 @@ class PdfCompressor {
         onProgress: (Float) -> Unit = {}
     ): Result<TargetSizeResult> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
+        var operationDir: File? = null
         var tempFile: File? = null
 
         try {
             ensureActive()
             onProgress(0.05f)
 
-            // Create a temp file to avoid loading everything into memory
-            val cacheDir = File(context.cacheDir, "compress_cache")
-            if (!cacheDir.exists()) cacheDir.mkdirs()
-            tempFile = File(cacheDir, "temp_compress_${System.currentTimeMillis()}.pdf")
+            // Operation-scoped workspace: all temp files live under this dir.
+            operationDir = newOperationDir(context)
+            tempFile = File(operationDir, "temp_compress.pdf")
 
             // Copy URI content to temp file
             context.contentResolver.openInputStream(inputUri)?.use { input ->
@@ -960,7 +993,7 @@ class PdfCompressor {
                 val progressStart = 0.10f + (0.80f * index / profiles.size)
                 val progressSpan = 0.80f / profiles.size
 
-                val opt = tryImageOptimization(context, tempFile, profile) { p ->
+                val opt = tryImageOptimization(context, tempFile, profile, operationDir!!) { p ->
                     onProgress(progressStart + p * progressSpan * 0.45f)
                 }
                 if (opt != null && opt.length() < (resultFile?.length() ?: originalSize)) {
@@ -974,7 +1007,7 @@ class PdfCompressor {
                 // Re-rendering is essential for large scanned or single-page image PDFs;
                 // their image data can be nested or already encoded efficiently.
                 if ((resultFile?.length() ?: originalSize) > targetBytes) {
-                    val rerender = tryFullRerender(context, tempFile, profile) { p ->
+                    val rerender = tryFullRerender(context, tempFile, profile, operationDir!!) { p ->
                         onProgress(progressStart + progressSpan * (0.45f + p * 0.55f))
                     }
                     if (rerender != null && rerender.length() < (resultFile?.length() ?: originalSize)) {
@@ -1033,7 +1066,8 @@ class PdfCompressor {
                 )
             )
         } finally {
-            tempFile?.delete()
+            // Covers success, failure, and cancellation; sibling workspaces untouched.
+            cleanupOperationDir(operationDir)
         }
     }
 
