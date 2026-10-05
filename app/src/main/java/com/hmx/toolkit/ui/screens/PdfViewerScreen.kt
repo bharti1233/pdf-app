@@ -653,12 +653,12 @@ fun PdfViewerScreen(
                         visible = toolsDrawerOpen,
                         enter = slideIn(
                             animationSpec = tween(200, easing = FastOutSlowInEasing),
-                            initialOffsetX = { IntSize(windowWidth, 0) },
-                            targetOffsetX = { IntSize(0, 0) }
+                            initialOffsetX = windowWidth.dp,
+                            targetOffsetX = 0.dp
                         ),
                         exit = slideOut(
                             animationSpec = tween(200, easing = FastOutSlowInEasing),
-                            targetOffsetX = { IntSize(windowWidth, 0) }
+                            targetOffsetX = windowWidth.dp
                         )
                     ) {
                         AnnotationToolbar(
