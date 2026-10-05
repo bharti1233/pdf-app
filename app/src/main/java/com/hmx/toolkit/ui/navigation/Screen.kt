@@ -33,14 +33,6 @@ sealed class Screen(val route: String) {
         }
     }
 
-    // PDF Viewer Legacy (full-featured viewer with annotations)
-    // unused - routes merged into PdfViewer
-    object PdfViewerLegacy : Screen("pdf_viewer_legacy?uri={uri}&name={name}") {
-        fun createRoute(uri: String, name: String = "PDF Document"): String {
-            return "pdf_viewer_legacy?uri=$uri&name=$name"
-        }
-    }
-    
     // PDF Tools
     object Merge : Screen("merge")
     object Split : Screen("split")
@@ -133,43 +125,6 @@ sealed class Screen(val route: String) {
                 "image_convert" -> ImageTools.createRoute("convert")
                 "image_metadata" -> ImageTools.createRoute("strip_metadata")
                 else -> fromToolId(toolId).route
-            }
-        }
-        
-        /**
-         * Returns the Screen object for a given feature title.
-         * Used for legacy HomeScreen compatibility.
-         */
-        fun fromFeatureTitle(title: String): Screen {
-            return when (title) {
-                "Merge PDFs" -> Merge
-                "Split PDF" -> Split
-                "Compress PDF" -> Compress
-                "Images to PDF" -> Convert
-                "PDF to Images" -> PdfToImage
-                "Extract Pages" -> Extract
-                "Rotate Pages" -> Rotate
-                "Add Security" -> Security
-                "View Metadata" -> Metadata
-                "Page Numbers" -> PageNumber
-                "Organize Pages" -> Organize
-                "Unlock PDF" -> Unlock
-                "Repair PDF" -> Repair
-                "HTML to PDF" -> HtmlToPdf
-                "Doc to PDF" -> DocToPdf
-                "View Document" -> DocViewer
-                "Extract Text" -> ExtractText
-                "Add Watermark" -> Watermark
-                "Flatten PDF" -> Flatten
-                "Sign PDF" -> SignPdf
-                "Fill Forms" -> FillForms
-                "Annotate PDF" -> Annotate
-                "Scan to PDF" -> ScanToPdf
-                "OCR" -> Ocr
-                "Print Studio" -> PrintStudio
-                "Print & Imposition" -> PrintStudio
-                "Image Tools" -> ImageTools
-                else -> Tools
             }
         }
     }

@@ -2,11 +2,7 @@ package com.hmx.toolkit.util
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -38,36 +34,9 @@ class RatingManagerTest {
         // 3rd usage
         assertFalse(RatingManager.incrementUsage(context))
 
-        // 4th usage - should return true
-        // We can check flow emission too
-        var emitted = false
-        val job = launch {
-            try {
-                // Collect one emission
-                RatingManager.showRatingRequest.take(1).collect {
-                    emitted = it
-                }
-            } catch (e: Exception) {
-                // Flow collection might fail if cancelled?
-            }
-        }
-
+        // 4th usage - should return true (threshold contract)
         val result = RatingManager.incrementUsage(context)
         assertTrue("Should return true on 4th usage", result)
-
-        // Give chance for emission to happen (though runBlocking handles it usually?)
-        // In Robolectric/runBlocking, execution order is usually sequential for launched coroutines unless delay/yield.
-        // But SharedFlow emit is suspend?
-
-        // If incrementUsage emits, it suspends until collectors receive (for SharedFlow without buffer? No, shared flow suspends if buffer full).
-        // Default SharedFlow buffer is 0, suspends on buffer overflow = SUSPEND.
-        // Wait, MutableSharedFlow default is extraBufferCapacity=0, onBufferOverflow=SUSPEND.
-        // If replay=0, it emits to active subscribers. It doesn't suspend unless subscribers are slow and buffer is full.
-
-        // Let's verify result is true.
-        // Emitted check might be flaky without proper test dispatcher.
-
-        job.cancel()
     }
 
     @Test

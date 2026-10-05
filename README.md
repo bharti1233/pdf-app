@@ -92,7 +92,8 @@ PDF Toolkit is published on **F-Droid**, the repository of free and open-source 
 - **Unlock PDF** — Remove passwords (with valid password)
 - **Watermark** — Add text or image watermarks
 - **All processing on-device** — No cloud, no servers
-- **No internet permission** — Completely offline capable
+- **No internet permission in F-Droid/OpenSource flavors** — fully offline capable
+  (the Play Store flavor declares INTERNET only for its URL → PDF feature)
 - **No data collection or tracking**
 
 ### 🔤 OCR & Text

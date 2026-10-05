@@ -25,8 +25,7 @@ android {
             useSupportLibrary = true
         }
         
-        // Play Store requirements
-        multiDexEnabled = true
+        // minSdk is 26, so multidex is natively supported (no legacy flag needed)
 
         // Keep resources only for supported locales (strips untranslated
         // resources bundled by libraries like AppCompat/Play Services)

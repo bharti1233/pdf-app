@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import androidx.test.core.app.ApplicationProvider
 import com.hmx.toolkit.data.FileManager
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -18,9 +19,13 @@ import org.robolectric.fakes.RoboCursor
 class CompressScreenTest {
 
     @Test
-    fun testFilePickerFilter_isPdf() {
-        val expectedMimeType = "application/pdf"
-        assertEquals("application/pdf", expectedMimeType)
+    fun testFilePickerFilter_rejectsUnresolvableUriAsPdf() {
+        // CompressScreen only offers PDFs ("application/pdf" picker filter);
+        // FileManager.isValidPdf is the validation gate for that flow.
+        // An unresolvable content URI must not validate as a PDF.
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val unknownUri = Uri.parse("content://mock/unknown_file.bin")
+        assertFalse(FileManager.isValidPdf(context, unknownUri))
     }
 
     @Test

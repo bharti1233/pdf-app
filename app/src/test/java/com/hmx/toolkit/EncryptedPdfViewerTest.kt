@@ -4,6 +4,10 @@ import android.content.Context
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import com.hmx.toolkit.ui.screens.PdfViewerUiState
 import com.hmx.toolkit.ui.screens.PdfViewerViewModel
 import kotlinx.coroutines.flow.first
@@ -14,6 +18,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 
@@ -21,19 +26,34 @@ import java.io.File
 @Config(sdk = [33])
 class EncryptedPdfViewerTest {
 
+    private lateinit var testDir: File
+    private lateinit var simpleEncrypted: File
+    private lateinit var unicodeEncrypted: File
+
     @Before
     fun setup() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         PDFBoxResourceLoader.init(context)
+        // Generate real encrypted fixtures at test time (no checked-in binaries).
+        testDir = File(context.cacheDir, "encrypted_fixtures").apply { mkdirs() }
+        simpleEncrypted = File(testDir, "encrypted_simple.pdf")
+        unicodeEncrypted = File(testDir, "encrypted_unicode_pwd.pdf")
+        createEncryptedPdf(simpleEncrypted, "secret123")
+        createEncryptedPdf(unicodeEncrypted, "pässwörd123")
+    }
+
+    private fun createEncryptedPdf(file: File, password: String) {
+        PDDocument().use { doc ->
+            doc.addPage(PDPage())
+            doc.protect(StandardProtectionPolicy(password, password, AccessPermission()))
+            doc.save(file)
+        }
     }
 
     @Test
     fun encryptedPdf_withoutPassword_setsPasswordRequiredNotIncorrect(): Unit = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val encryptedFile = File("test_pdfs/encrypted_simple.pdf")
-        if (!encryptedFile.exists()) return@runBlocking
-
-        val uri = Uri.fromFile(encryptedFile)
+        val uri = Uri.fromFile(simpleEncrypted)
         val viewModel = PdfViewerViewModel()
 
         viewModel.loadPdf(context, uri, password = "")
@@ -47,10 +67,7 @@ class EncryptedPdfViewerTest {
     @Test
     fun encryptedPdf_withWrongPassword_setsPasswordRequiredIncorrect(): Unit = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val encryptedFile = File("test_pdfs/encrypted_simple.pdf")
-        if (!encryptedFile.exists()) return@runBlocking
-
-        val uri = Uri.fromFile(encryptedFile)
+        val uri = Uri.fromFile(simpleEncrypted)
         val viewModel = PdfViewerViewModel()
 
         viewModel.loadPdf(context, uri, password = "wrong_password")
@@ -64,10 +81,7 @@ class EncryptedPdfViewerTest {
     @Test
     fun encryptedPdf_withCorrectPassword_loadsSuccessfully(): Unit = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val encryptedFile = File("test_pdfs/encrypted_simple.pdf")
-        if (!encryptedFile.exists()) return@runBlocking
-
-        val uri = Uri.fromFile(encryptedFile)
+        val uri = Uri.fromFile(simpleEncrypted)
         val viewModel = PdfViewerViewModel()
 
         viewModel.loadPdf(context, uri, password = "secret123")
@@ -81,10 +95,7 @@ class EncryptedPdfViewerTest {
     @Test
     fun encryptedPdf_withUnicodePassword_loadsSuccessfully(): Unit = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val encryptedFile = File("test_pdfs/encrypted_unicode_pwd.pdf")
-        if (!encryptedFile.exists()) return@runBlocking
-
-        val uri = Uri.fromFile(encryptedFile)
+        val uri = Uri.fromFile(unicodeEncrypted)
         val viewModel = PdfViewerViewModel()
 
         viewModel.loadPdf(context, uri, password = "pässwörd123")
