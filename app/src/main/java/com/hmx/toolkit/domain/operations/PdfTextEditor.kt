@@ -171,15 +171,15 @@ class PdfTextEditor {
                     when (token.name) {
                         "Tj", "'", "\"" -> {
                             if (operand is COSString) {
+                                // getBytes() returns the live backing array: mutate in place.
                                 val bytes = operand.bytes
                                 for (bi in bytes.indices) {
                                     if (glyphCursor in matchStart until matchEnd) {
-                                        bytes[bi] = 0x20
+                                        bytes[bi] = 0x20.toByte()
                                         blanked++
                                     }
                                     glyphCursor++
                                 }
-                                operand.value = bytes
                             }
                         }
                         "TJ" -> {
@@ -190,12 +190,11 @@ class PdfTextEditor {
                                         val bytes = element.bytes
                                         for (bi in bytes.indices) {
                                             if (glyphCursor in matchStart until matchEnd) {
-                                                bytes[bi] = 0x20
+                                                bytes[bi] = 0x20.toByte()
                                                 blanked++
                                             }
                                             glyphCursor++
                                         }
-                                        element.value = bytes
                                     }
                                 }
                             }
