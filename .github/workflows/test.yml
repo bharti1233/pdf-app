@@ -56,7 +56,8 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle.kts') }}
 
       - name: Run unit tests
-        run: chmod +x gradlew && ./gradlew testFdroidDebugUnitTest
+        # TEMPORARY hang isolation (Phase 3): PageCount class only. Revert after.
+        run: chmod +x gradlew && ./gradlew testFdroidDebugUnitTest --tests "com.hmx.toolkit.ui.screens.PdfViewerPageCountTest"
 
       - name: Upload test results
         if: always()
