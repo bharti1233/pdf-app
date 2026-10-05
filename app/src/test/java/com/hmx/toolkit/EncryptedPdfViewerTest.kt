@@ -23,7 +23,10 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+// manifest=NONE on purpose: the real PdfToolkitApplication.onCreate launches a
+// background cache sweep that deletes root *.pdf files, which races fixture
+// creation. This test needs no app services (ViewModel + PDFBox only).
+@Config(sdk = [33], manifest = Config.NONE)
 class EncryptedPdfViewerTest {
 
     private lateinit var simpleEncrypted: File
