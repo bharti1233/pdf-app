@@ -29,6 +29,8 @@ import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideOut
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.geometry.IntSize
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -619,6 +621,9 @@ fun PdfViewerScreen(
                         )
                     }
 
+                    val windowInfo = LocalWindowInfo.current
+                    val windowWidth = with(LocalDensity.current) { windowInfo?.size?.width?.toPx()?.toInt() ?: 0 }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -648,8 +653,15 @@ fun PdfViewerScreen(
                     // Tool drawer (hidden by default) opens/closes smoothly from the right; Pan stays permanently visible.
                     AnimatedVisibility(
                         visible = toolsDrawerOpen,
-                        enter = slideIn(animationSpec = tween(200, easing = FastOutSlowInEasing)),
-                        exit = slideOut(animationSpec = tween(200, easing = FastOutSlowInEasing))
+                        enter = slideIn(
+                            animationSpec = tween(200, easing = FastOutSlowInEasing),
+                            initialOffsetX = { IntSize(windowWidth, 0) },
+                            targetOffsetX = { IntSize(0, 0) }
+                        ),
+                        exit = slideOut(
+                            animationSpec = tween(200, easing = FastOutSlowInEasing),
+                            targetOffsetX = { IntSize(windowWidth, 0) }
+                        )
                     ) {
                         AnnotationToolbar(
                             selectedTool = selectedAnnotationTool,
