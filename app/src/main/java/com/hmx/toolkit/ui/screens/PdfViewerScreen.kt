@@ -619,8 +619,7 @@ fun PdfViewerScreen(
                         )
                     }
 
-                    val windowInfo = LocalWindowInfo.current
-                    val windowWidth = with(LocalDensity.current) { windowInfo?.size?.width?.toPx()?.toInt() ?: 0 }
+                    val windowWidth = LocalConfiguration.current.screenWidthDp.roundToInt() // in dp
 
                     Row(
                         modifier = Modifier
@@ -653,12 +652,12 @@ fun PdfViewerScreen(
                         visible = toolsDrawerOpen,
                         enter = slideIn(
                             animationSpec = tween(200, easing = FastOutSlowInEasing),
-                            initialOffsetX = windowWidth.dp,
-                            targetOffsetX = 0.dp
+                            initialOffset = windowWidth.dp,
+                            targetOffset = 0.dp
                         ),
                         exit = slideOut(
                             animationSpec = tween(200, easing = FastOutSlowInEasing),
-                            targetOffsetX = windowWidth.dp
+                            targetOffset = windowWidth.dp
                         )
                     ) {
                         AnnotationToolbar(
