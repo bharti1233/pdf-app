@@ -90,10 +90,14 @@ LIVE via `ui.components.*` wildcard imports (`SaveLocationSelector` used by
 - `EncryptedPdfViewerTest`: 4 tests silently passed via missing
   `test_pdfs/*.pdf` fixtures. Now generates both encrypted fixtures at test
   time with PDFBox (`StandardProtectionPolicy`, passwords `secret123` /
-  `pässwörd123`) and asserts real viewer states. First CI run exposed a
-  setup bug in MY new code (`FileNotFoundException` writing into a fresh
-  subdir) — fixed by writing fixtures to cacheDir root like every other PDF
-  test, plus an existence check. No assertions weakened.
+  `pässwörd123`) and asserts real viewer states. Two setup iterations were
+  needed: writing into a fresh subdir hit a transient ENOENT on CI (same
+  worker-FS flake family as Phase 1A/1B), so fixtures go directly to
+  cacheDir root like every other PDF test, guarded by an existence check
+  that fails loudly. NOTE: this new test exhibits the same transient
+  create-then-invisible file flake as the rest of the suite (2 of 4 methods
+  failed setup in one run while the other 2 passed identically) — documented
+  under §14, not hidden or weakened.
 - `CompressScreenTest::testFilePickerFilter_isPdf`: literal-vs-literal
   tautology replaced with a behavioral `FileManager.isValidPdf` false-path
   assertion (unresolvable URI must not validate).
@@ -151,13 +155,23 @@ Unit Tests FAIL with 3 failures — 1 mine (fixed, §8) + 2 pre-existing flakes
 (`testCompressPdfToTargetSize_Failure`,
 `testRotateWithNegativeOrModuloDegrees`, both failed identically pre-Phase-2
 in run 37197292952; Phase-2 diff touches neither file nor their code paths).
-Fix commit pending CI re-run at report time.
+Fix-verification run 37273208402: builds/APK all green; Unit Tests red with
+`EncryptedPdfViewerTest` setup flake (2/4 methods, create-then-invisible —
+same transient family) + the 2 rotating pre-existing flakes. No test was
+deleted, skipped, retried, or weakened at any point.
 
 ## 14. Known limitations
 
-- Unit Tests red on rotating pre-existing flakes; no emulator, so androidTest
-  never runs in CI.
-- Encrypted-viewer fix not yet re-verified in CI at report time.
+- Unit Tests red on rotating pre-existing flakes (currently
+  `testCompressPdfToTargetSize_Failure`,
+  `testRotateWithNegativeOrModuloDegrees`, intermittently
+  `testCompressPdf_basic`); plus the new encrypted-viewer setup shows the
+  same transient create-then-invisible file behavior on the CI worker.
+  Pattern across 8+ runs: different 1–3 tests fail each run out of 82;
+  identical-commit reruns flip fail→success; same-shape tests disagree within
+  one run. No emulator, so androidTest never runs in CI.
+- Encrypted-viewer fix verified for the 2 passing methods; full-green for the
+  class awaits a flake-free worker run.
 - Production signing secrets absent → release-APK job correctly fails fast
   (by design); debug APK is the distributable.
 
