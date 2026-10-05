@@ -2,7 +2,7 @@ package com.hmx.toolkit.domain.operations
 
 import android.content.Context
 import android.net.Uri
-import com.tom_roush.pdfbox.contentstream.PDFStreamParser
+import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.cos.COSArray
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSString
@@ -103,7 +103,7 @@ class PdfTextEditor {
         newText: String,
         onProgress: (Float) -> Unit = {}
     ): Result<TextEditResult> {
-        try {
+        return try {
             onProgress(0.05f)
 
             if (oldText.isBlank()) {
