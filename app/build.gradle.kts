@@ -167,6 +167,13 @@ android {
             // Required so Robolectric can see merged resources/assets
             // (strings, pdfbox-android font AFMs from the AAR).
             isIncludeAndroidResources = true
+            // TEMPORARY hang diagnosis (Phase 3): log every test start so a
+            // hanging test is identifiable from CI output. Revert after.
+            all {
+                testLogging {
+                    events("started", "failed", "skipped")
+                }
+            }
         }
     }
 
