@@ -423,6 +423,10 @@
     <string name="pdf_failed_to_render_page">Failed to render page %1$d</string>
     <string name="pdf_copied_to_clipboard">Copied!</string>
     <string name="pdf_selection_highlighted">Selection Highlighted</string>
+    <string name="pdf_edit_text_title">Edit text</string>
+    <string name="pdf_edit_text_hint">Replacement text</string>
+    <string name="pdf_edit_text_saved">Text updated — save the PDF to keep changes</string>
+    <string name="pdf_edit_text_failed">Could not edit text</string>
     <string name="pdf_enter_page_number_range">Enter page number (1-%1$d)</string>
     <string name="pdf_password_required">Password Required</string>
     <string name="pdf_password_incorrect_retry">Incorrect password. Please try again.</string>

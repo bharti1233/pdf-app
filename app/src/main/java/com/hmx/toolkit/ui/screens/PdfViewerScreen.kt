@@ -33,6 +33,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -114,6 +116,9 @@ fun PdfViewerScreen(
     val selectedColor by viewModel.selectedColor.collectAsState()
     val annotations by viewModel.annotations.collectAsState()
     val textNotes by viewModel.textNotes.collectAsState()
+    // Document identity: restarts page renders when a different PDF is loaded
+    // (page indices alone would reuse the previous document's bitmaps).
+    val documentGeneration by viewModel.documentGeneration.collectAsState()
 
     // Stroke width configurations
     val highlighterWidth by viewModel.highlighterWidth.collectAsState()
@@ -137,6 +142,11 @@ fun PdfViewerScreen(
     var selectStartCharIndex by remember { mutableIntStateOf(-1) }
     var selectEndCharIndex by remember { mutableIntStateOf(-1) }
 
+    // True text-edit dialog state (selection -> edit existing PDF text)
+    var showEditTextDialog by remember { mutableStateOf(false) }
+    var editTextInitial by remember { mutableStateOf("") }
+    var editTextValue by remember { mutableStateOf("") }
+
     // Clear selection if active tool or selected tool changes
     LaunchedEffect(toolState, selectedAnnotationTool) {
         if (toolState !is PdfTool.None || selectedAnnotationTool != AnnotationTool.NONE) {
@@ -144,6 +154,14 @@ fun PdfViewerScreen(
             selectStartCharIndex = -1
             selectEndCharIndex = -1
         }
+    }
+
+    // Clear text selection when a different document is loaded so edit/copy
+    // actions can never operate on the previous document's text.
+    LaunchedEffect(documentGeneration) {
+        selectPageIndex = -1
+        selectStartCharIndex = -1
+        selectEndCharIndex = -1
     }
 
     // Auto-hide thickness slider when annotation tool is NONE or NOTE
@@ -663,6 +681,7 @@ fun PdfViewerScreen(
                     PdfPagesContent(
                         totalPages = totalPages,
                         currentPage = currentPage,
+                        documentGeneration = documentGeneration,
                         loadPage = { viewModel.loadPage(it) },
                         getPageState = { viewModel.getPageState(it) },
                         onRetryPage = { viewModel.retryPage(it) },
@@ -714,6 +733,11 @@ fun PdfViewerScreen(
                             selectPageIndex = pIdx
                             selectStartCharIndex = start
                             selectEndCharIndex = end
+                        },
+                        onEditTextRequest = { text ->
+                            editTextInitial = text
+                            editTextValue = text
+                            showEditTextDialog = true
                         },
                         viewModel = viewModel
                     )
@@ -876,6 +900,70 @@ fun PdfViewerScreen(
         )
     }
 
+    if (showEditTextDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showEditTextDialog = false
+                editTextValue = ""
+            },
+            title = { Text(stringResource(R.string.pdf_edit_text_title)) },
+            text = {
+                OutlinedTextField(
+                    value = editTextValue,
+                    onValueChange = { editTextValue = it },
+                    placeholder = { Text(stringResource(R.string.pdf_edit_text_hint)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val pageIndex = selectPageIndex
+                        val original = editTextInitial
+                        val replacement = editTextValue
+                        showEditTextDialog = false
+                        editTextValue = ""
+                        if (pageIndex >= 0 && original.isNotBlank()) {
+                            viewModel.editPageText(pageIndex, original, replacement) { result ->
+                                result.fold(
+                                    onSuccess = {
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.pdf_edit_text_saved),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    onFailure = { e ->
+                                        Toast.makeText(
+                                            context,
+                                            "${context.getString(R.string.pdf_edit_text_failed)}: ${e.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                )
+                            }
+                        }
+                        selectPageIndex = -1
+                        selectStartCharIndex = -1
+                        selectEndCharIndex = -1
+                    }
+                ) {
+                    Text(stringResource(R.string.action_save))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showEditTextDialog = false
+                        editTextValue = ""
+                    }
+                ) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
     if (showEditNoteDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -967,6 +1055,7 @@ private fun AnnotationToolbar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
@@ -1266,6 +1355,7 @@ private fun ErrorState(
 private fun PdfPagesContent(
     totalPages: Int,
     currentPage: Int,
+    documentGeneration: Int,
     loadPage: suspend (Int) -> Bitmap?,
     getPageState: (Int) -> PdfViewerViewModel.PageRenderState,
     onRetryPage: (Int) -> Unit,
@@ -1299,6 +1389,7 @@ private fun PdfPagesContent(
     selectStartCharIndex: Int,
     selectEndCharIndex: Int,
     onSelectionChange: (Int, Int, Int) -> Unit,
+    onEditTextRequest: (String) -> Unit,
     viewModel: PdfViewerViewModel
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
@@ -1401,7 +1492,7 @@ private fun PdfPagesContent(
             ) {
                 items(
                     count = totalPages,
-                    key = { it }
+                    key = { "$documentGeneration-$it" }
                 ) { index ->
                     val pageMatches = remember(searchState.matches, index) {
                         searchState.matches.filter { it.pageIndex == index }
@@ -1420,6 +1511,7 @@ private fun PdfPagesContent(
 
                     PdfPageWithAnnotations(
                         pageIndex = index,
+                        documentGeneration = documentGeneration,
                         loadPage = loadPage,
                         isEditMode = isEditMode,
                         selectedTool = selectedTool,
@@ -1453,6 +1545,7 @@ private fun PdfPagesContent(
                         selectStartCharIndex = selectStartCharIndex,
                         selectEndCharIndex = selectEndCharIndex,
                         onSelectionChange = onSelectionChange,
+                        onEditTextRequest = onEditTextRequest,
                         viewModel = viewModel,
                         listState = listState
                     )
@@ -1466,6 +1559,7 @@ private fun PdfPagesContent(
 @Composable
 private fun PdfPageWithAnnotations(
     pageIndex: Int,
+    documentGeneration: Int,
     loadPage: suspend (Int) -> Bitmap?,
     isEditMode: Boolean,
     selectedTool: AnnotationTool,
@@ -1495,6 +1589,7 @@ private fun PdfPageWithAnnotations(
     selectStartCharIndex: Int,
     selectEndCharIndex: Int,
     onSelectionChange: (Int, Int, Int) -> Unit,
+    onEditTextRequest: (String) -> Unit,
     viewModel: PdfViewerViewModel,
     listState: LazyListState
 ) {
@@ -1502,8 +1597,9 @@ private fun PdfPageWithAnnotations(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
-    // Local copy of page text data loaded when selected or long pressed
-    var pageTextData by remember { mutableStateOf<PageTextData?>(null) }
+    // Local copy of page text data loaded when selected or long pressed.
+    // Keyed on document generation so text from a previous PDF is never shown.
+    var pageTextData by remember(documentGeneration) { mutableStateOf<PageTextData?>(null) }
 
     LaunchedEffect(selectPageIndex) {
         if (selectPageIndex != pageIndex) {
@@ -1511,8 +1607,10 @@ private fun PdfPageWithAnnotations(
         }
     }
 
-    // Load bitmap lazily
-    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = pageIndex) {
+    // Load bitmap lazily. Keyed on document generation too: without it, opening
+    // a different PDF with the same page count would keep showing the previous
+    // document's bitmaps (produceState only restarts when its keys change).
+    val bitmap by produceState<Bitmap?>(initialValue = null, pageIndex, documentGeneration) {
         value = loadPage(pageIndex)
     }
 
@@ -1526,22 +1624,45 @@ private fun PdfPageWithAnnotations(
         }
     }
 
-    // Shimmer animation for loading state
-    val shimmerColors = listOf(
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-    )
-    val transition = rememberInfiniteTransition(label = "shimmer")
-    val translateAnim by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shimmer"
-    )
+    // Page-loading placeholder. The shimmer animation lives in its own
+    // composable so the infinite transition only runs while a page is actually
+    // loading — otherwise every visible page would recompose every frame.
+    @Composable
+    fun PageLoadingPlaceholder() {
+        val shimmerColors = listOf(
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        )
+        val transition = rememberInfiniteTransition(label = "shimmer")
+        val translateAnim by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1000f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "shimmer"
+        )
+        val brush = Brush.linearGradient(
+            colors = shimmerColors,
+            start = Offset(translateAnim - 200f, 0f),
+            end = Offset(translateAnim, 0f)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f / 1.414f)
+                .background(brush)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .size(32.dp)
+                    .align(Alignment.Center),
+                strokeWidth = 2.dp
+            )
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -1639,25 +1760,8 @@ private fun PdfPageWithAnnotations(
                     }
                 }
                 else -> {
-                    // Loading shimmer skeleton
-                    val brush = Brush.linearGradient(
-                        colors = shimmerColors,
-                        start = Offset(translateAnim - 200f, 0f),
-                        end = Offset(translateAnim, 0f)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f / 1.414f)
-                            .background(brush)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .align(Alignment.Center),
-                            strokeWidth = 2.dp
-                        )
-                    }
+                    // Loading shimmer skeleton (animation scoped to this branch)
+                    PageLoadingPlaceholder()
                 }
             }
             
@@ -1862,6 +1966,27 @@ private fun PdfPageWithAnnotations(
                                 Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.action_copy), modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(stringResource(R.string.action_copy), style = MaterialTheme.typography.bodySmall)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(20.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant)
+                            )
+
+                            TextButton(
+                                onClick = {
+                                    onEditTextRequest(
+                                        currentPositions.subList(selectStartCharIndex, selectEndCharIndex)
+                                            .joinToString("") { it.unicode }
+                                    )
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.action_edit), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(stringResource(R.string.action_edit), style = MaterialTheme.typography.bodySmall)
                             }
                             
                             Box(

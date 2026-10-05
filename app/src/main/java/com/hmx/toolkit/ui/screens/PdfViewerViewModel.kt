@@ -34,6 +34,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.Collections
 import kotlinx.coroutines.Dispatchers
+import com.hmx.toolkit.domain.operations.PdfTextEditor
+import com.hmx.toolkit.domain.operations.TextEditResult
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -170,6 +172,12 @@ open class PdfViewerViewModel : ViewModel() {
     private val documentMutex = Mutex()
     private var tempFile: File? = null
 
+    // Document identity for render-cache correctness. Incremented on every
+    // document load/close so Compose render keys restart for the new document
+    // (page indices alone would show the previous document's bitmaps).
+    private val _documentGeneration = MutableStateFlow(0)
+    val documentGeneration: StateFlow<Int> = _documentGeneration.asStateFlow()
+
     // Search Cache with LRU eviction (max 20 pages) to prevent OOM
     private val extractedTextCache = object : LinkedHashMap<Int, PageTextData>(20, 0.75f, true) {
         override fun removeEldestEntry(eldest: Map.Entry<Int, PageTextData>) = size > 20
@@ -186,10 +194,7 @@ open class PdfViewerViewModel : ViewModel() {
         data class Error(val pageIndex: Int, val message: String) : PageRenderState()
     }
     private val _pageStates = MutableStateFlow<Map<Int, PageRenderState>>(emptyMap())
-    
-    // Current page tracking for memory management
-    private var _currentPage: Int = 0
-    
+
     // Safe bitmap lifecycle management - prevents recycled bitmap crashes
     private val activeBitmaps = Collections.synchronizedSet(mutableSetOf<Bitmap>())
     private val uiBitmapRefs = mutableMapOf<Int, Bitmap>()
@@ -236,10 +241,40 @@ open class PdfViewerViewModel : ViewModel() {
         unregisterBitmap(pageIndex)
     }
 
+    /**
+     * Replaces existing page text in the open document (true content removal
+     * via [PdfTextEditor], not an overlay). On success the page bitmap cache
+     * is invalidated and the document generation is bumped so the page
+     * re-renders from the edited content. Unsaved until the normal save flow.
+     */
+    fun editPageText(
+        pageIndex: Int,
+        oldText: String,
+        newText: String,
+        onDone: (Result<TextEditResult>) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = documentMutex.withLock {
+                val doc = document
+                    ?: return@withLock Result.failure<TextEditResult>(
+                        IllegalStateException("Document is not loaded")
+                    )
+                PdfTextEditor().replaceInDocument(doc, pageIndex, oldText, newText)
+            }
+            if (result.isSuccess) {
+                bitmapCache.remove(pageIndex)
+                unregisterBitmap(pageIndex)
+                _documentGeneration.value += 1
+            }
+            withContext(Dispatchers.Main) { onDone(result) }
+        }
+    }
+
     fun loadPdf(context: Context, uri: Uri, password: String = "", savedPage: Int = 0) {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             _uiState.value = PdfViewerUiState.Loading
+            _documentGeneration.value += 1
             try {
                 if (!PDFBoxResourceLoader.isReady()) {
                     PDFBoxResourceLoader.init(context.applicationContext)
@@ -359,7 +394,6 @@ open class PdfViewerViewModel : ViewModel() {
                             Log.w("PdfViewerVM", "Failed to load existing notes", e)
                         }
 
-                        _currentPage = savedPage.coerceIn(0, pageCount - 1)
                         _uiState.value = PdfViewerUiState.Loaded(pageCount)
                     } catch (e: Exception) {
                         // Clean up any temp file created if loading failed
@@ -373,12 +407,7 @@ open class PdfViewerViewModel : ViewModel() {
             }
         }
     }
-    
-    // Update current page for memory management
-    fun updateCurrentPage(pageIndex: Int) {
-        _currentPage = pageIndex
-    }
-    
+
     // Retry a failed page render
     fun retryPage(pageIndex: Int) {
         unregisterBitmap(pageIndex)
@@ -570,6 +599,10 @@ fun eraseAnnotations(pageIndex: Int, eraserPoints: List<Offset>, eraserNormWidth
         return try {
             val bitmap = withContext(Dispatchers.IO) {
                 documentMutex.withLock {
+                    // Abort promptly if this page left the viewport while queued
+                    // behind another render (PdfRenderer is single-threaded via
+                    // this mutex, so fast scrolls would otherwise pile up work).
+                    ensureActive()
                     // Double-check cache inside lock
                     bitmapCache.get(pageIndex)?.let { cached ->
                         if (!cached.isRecycled) {
