@@ -169,7 +169,7 @@ android {
             isIncludeAndroidResources = true
             // TEMPORARY hang diagnosis (Phase 3): log every test start so a
             // hanging test is identifiable from CI output. Revert after.
-            all {
+            unitTests.all {
                 testLogging {
                     events("started", "failed", "skipped")
                 }
