@@ -91,6 +91,28 @@ import androidx.compose.ui.platform.testTag
 
 
 /**
+ * State holder for the inline text-editing overlay shown when a user taps
+ * existing text inside Edit mode. The overlay appears directly over the
+ * detected line inside the PDF page.
+ */
+private data class EditLineState(
+    val originalText: String,
+    val startPx: Float,
+    val topPx: Float,
+    val widthPx: Float,
+    val heightPx: Float
+)
+
+// Result of locating a full editable line at a given char index.
+private data class EditLine(
+    val startIndex: Int,
+    val endIndexExclusive: Int,
+    val text: String,
+    val rect: RectF
+)
+
+
+/**
  * PDF Viewer Screen with annotation support.
  * Supports zoom, scroll, page navigation, highlighting, and marking.
  */
@@ -125,6 +147,7 @@ fun PdfViewerScreen(
     val markerWidth by viewModel.markerWidth.collectAsState()
     val eraserWidth by viewModel.eraserWidth.collectAsState()
     var showThicknessSlider by remember { mutableStateOf(false) }
+    var toolsDrawerOpen by remember { mutableStateOf(false) }
 
     // Text note dialog state
     var showAddNoteDialog by remember { mutableStateOf(false) }
@@ -574,44 +597,69 @@ fun PdfViewerScreen(
             }
         },
         bottomBar = {
-            Column {
-                val isEditMode = toolState is PdfTool.Edit
+            if (toolState is PdfTool.Edit) {
+                Column {
+                    // Tool-specific thickness panel integrated per selected tool; it does NOT depend on the drawer arrow.
+                    AnimatedVisibility(
+                        visible = selectedAnnotationTool != AnnotationTool.NONE && selectedAnnotationTool != AnnotationTool.NOTE && showThicknessSlider,
+                        enter = fadeIn() + slideInVertically { it },
+                        exit = fadeOut() + slideOutVertically { it }
+                    ) {
+                        ThicknessSliderPanel(
+                            tool = selectedAnnotationTool,
+                            color = selectedColor,
+                            highlighterWidth = highlighterWidth,
+                            markerWidth = markerWidth,
+                            eraserWidth = eraserWidth,
+                            onHighlighterWidthChange = { viewModel.setHighlighterWidth(it) },
+                            onMarkerWidthChange = { viewModel.setMarkerWidth(it) },
+                            onEraserWidthChange = { viewModel.setEraserWidth(it) }
+                        )
+                    }
 
-                // Brush size selection slider
-                AnimatedVisibility(
-                    visible = isEditMode && showControls && showThicknessSlider && selectedAnnotationTool != AnnotationTool.NONE && selectedAnnotationTool != AnnotationTool.NOTE,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it }
-                ) {
-                    ThicknessSliderPanel(
-                        tool = selectedAnnotationTool,
-                        color = selectedColor,
-                        highlighterWidth = highlighterWidth,
-                        markerWidth = markerWidth,
-                        eraserWidth = eraserWidth,
-                        onHighlighterWidthChange = { viewModel.setHighlighterWidth(it) },
-                        onMarkerWidthChange = { viewModel.setMarkerWidth(it) },
-                        onEraserWidthChange = { viewModel.setEraserWidth(it) }
-                    )
-                }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = {
+                            viewModel.setAnnotationTool(AnnotationTool.NONE)
+                            toolsDrawerOpen = false
+                        }) {
+                            Icon(
+                                Icons.Default.PanTool,
+                                contentDescription = stringResource(R.string.pdf_tool_pan),
+                                tint = if (selectedAnnotationTool == AnnotationTool.NONE) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                            )
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        IconButton(onClick = { toolsDrawerOpen = !toolsDrawerOpen }) {
+                            if (toolsDrawerOpen) {
+                                Icon(Icons.Default.ArrowForward, contentDescription = "Close tool drawer")
+                            } else {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Open tool drawer")
+                            }
+                        }
+                    }
 
-                // Annotation toolbar
-                AnimatedVisibility(
-                    visible = isEditMode && showControls,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it }
-                ) {
-                    AnnotationToolbar(
-                        selectedTool = selectedAnnotationTool,
-                        selectedColor = selectedColor,
-                        onToolSelected = { viewModel.setAnnotationTool(it) },
-                        onColorPickerClick = { showColorPicker = true },
-                        onUndoClick = { viewModel.undoAnnotation() },
-                        canUndo = annotations.isNotEmpty() || textNotes.isNotEmpty(),
-                        onBrushSizeClick = { showThicknessSlider = !showThicknessSlider }
-                    )
+                    // Tool drawer (hidden by default) opens/closes smoothly from the right; Pan stays permanently visible.
+                    AnimatedVisibility(
+                        visible = toolsDrawerOpen,
+                        enter = slideInHorizontally { it },
+                        exit = slideOutHorizontally { it }
+                    ) {
+                        AnnotationToolbar(
+                            selectedTool = selectedAnnotationTool,
+                            selectedColor = selectedColor,
+                            onToolSelected = { viewModel.setAnnotationTool(it) },
+                            onColorPickerClick = { showColorPicker = true },
+                            onUndoClick = { viewModel.undoAnnotation() },
+                            canUndo = annotations.isNotEmpty() || textNotes.isNotEmpty(),
+                            onBrushSizeClick = { showThicknessSlider = !showThicknessSlider }
+                        )
+                    }
                 }
-                
             }
         }
     ) { paddingValues ->
@@ -1060,15 +1108,6 @@ private fun AnnotationToolbar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ToolButton(
-                icon = Icons.Default.PanTool,
-                label = stringResource(R.string.pdf_tool_pan),
-                isSelected = selectedTool == AnnotationTool.NONE,
-                onClick = {
-                    onToolSelected(AnnotationTool.NONE)
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                }
-            )
             ToolButton(
                 icon = Icons.Default.Highlight,
                 label = stringResource(R.string.pdf_highlighter),
@@ -1597,6 +1636,11 @@ private fun PdfPageWithAnnotations(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
+    // Inline text-editing overlay state (tap text in Edit mode to edit directly)
+    var editingState by remember { mutableStateOf<EditLineState?>(null) }
+    var editText by remember { mutableStateOf("") }
+    var editCursor by remember { mutableIntStateOf(0) }
+
     // Local copy of page text data loaded when selected or long pressed.
     // Keyed on document generation so text from a previous PDF is never shown.
     var pageTextData by remember(documentGeneration) { mutableStateOf<PageTextData?>(null) }
@@ -1687,9 +1731,54 @@ private fun PdfPageWithAnnotations(
                     if ((!isEditMode || selectedTool == AnnotationTool.NONE) && safeBitmap != null) {
                         Modifier.pointerInput(pageIndex, safeBitmap, size) {
                             detectTapGestures(
-                                onTap = {
-                                    if (selectPageIndex != -1) {
-                                        onSelectionChange(-1, -1, -1)
+                                onTap = { offset ->
+                                    val isEditModePan = isEditMode && selectedTool == AnnotationTool.NONE
+                                    if (isEditModePan) {
+                                        if (listState.isScrollInProgress) return@detectTapGestures
+                                        scope.launch {
+                                            val bmp = safeBitmap ?: return@launch
+                                            val textData = viewModel.getPageText(pageIndex)
+                                            if (textData != null && textData.positions.isNotEmpty()) {
+                                                pageTextData = textData
+                                                val scaleX = size.width.toFloat() / bmp.width.toFloat()
+                                                val scaleY = size.height.toFloat() / bmp.height.toFloat()
+                                                val closest = findClosestCharIndex(
+                                                    offset.x, offset.y,
+                                                    textData.positions,
+                                                    scaleX, scaleY
+                                                )
+                                                if (closest != -1) {
+                                                    val editLine = findEditableLine(
+                                                        closest, textData.positions
+                                                    )
+                                                    if (editLine != null) {
+                                                        val startPx = editLine.rect.left * PdfViewerViewModel.RENDER_SCALE * scaleX
+                                                        val topPx = editLine.rect.top * PdfViewerViewModel.RENDER_SCALE * scaleY
+                                                        val widthPx = (editLine.rect.right - editLine.rect.left) * PdfViewerViewModel.RENDER_SCALE * scaleX
+                                                        val heightPx = (editLine.rect.bottom - editLine.rect.top) * PdfViewerViewModel.RENDER_SCALE * scaleY
+                                                        editingState = EditLineState(
+                                                            originalText = editLine.text,
+                                                            startPx = startPx,
+                                                            topPx = topPx,
+                                                            widthPx = widthPx.coerceAtLeast(24f),
+                                                            heightPx = heightPx.coerceAtLeast(24f)
+                                                        )
+                                                        editText = editLine.text
+                                                        editCursor = (closest - editLine.startIndex).coerceIn(0, editLine.text.length)
+                                                        return@launch
+                                                    }
+                                                }
+                                            }
+                                            // treat tap as clear selection if not editing
+                                            if (selectPageIndex != -1) {
+                                                onSelectionChange(-1, -1, -1)
+                                            }
+                                        }
+                                    } else {
+                                        // clear selection when tapping outside edit mode
+                                        if (selectPageIndex != -1) {
+                                            onSelectionChange(-1, -1, -1)
+                                        }
                                     }
                                 },
                                 onLongPress = { touchOffset ->
@@ -2036,6 +2125,54 @@ private fun PdfPageWithAnnotations(
                 }
             }
             
+            // Inline text editing overlay (tap text in edit mode)
+            if (editingState != null) {
+                val line = editingState!!
+                val density = LocalDensity.current
+                val leftDp = with(density) { line.startPx.toDp() }
+                val topDp = with(density) { line.topPx.toDp() }
+                val minWidthDp = with(density) { (line.widthPx + 40f).toDp().coerceAtLeast(120.dp) }
+                val minHeightDp = with(density) { (line.heightPx + 40f).toDp().coerceAtLeast(48.dp) }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = leftDp, top = topDp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+                            .padding(4.dp)
+                            .widthIn(min = minWidthDp)
+                            .heightIn(min = minHeightDp)
+                    ) {
+                        OutlinedTextField(
+                            value = editText,
+                            onValueChange = { editText = it },
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row {
+                            IconButton(onClick = {
+                                val newText = editText
+                                val old = line.originalText
+                                scope.launch {
+                                    viewModel.editPageText(pageIndex, old, newText) { result ->
+                                        // Generation bump triggers re-render automatically on success.
+                                    }
+                                }
+                                editingState = null
+                                editText = ""
+                            }) {
+                                Icon(Icons.Default.Check, contentDescription = "Save edit")
+                            }
+                            IconButton(onClick = { editingState = null; editText = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel edit")
+                            }
+                        }
+                    }
+                }
+            }
+
             // Annotation overlay (kept same but normalized/denormalized)
             if ((isEditMode || annotations.isNotEmpty() || pageNotes.isNotEmpty()) && bitmap != null) {
                 Canvas(
@@ -2455,6 +2592,33 @@ private fun findClosestCharIndex(
     }
 
     return closestIndex
+}
+
+// Find a contiguous line of TextPosition around charIndex.
+// The grouping uses the same approximate tolerance as selection overlay.
+private fun findEditableLine(
+    charIndex: Int,
+    positions: List<TextPosition>
+): EditLine? {
+    if (charIndex < 0 || charIndex >= positions.size) return null
+    val target = positions[charIndex]
+    val tolerance = (target.heightDir / 2f).coerceAtLeast(1f)
+    var start = charIndex
+    while (start > 0 && kotlin.math.abs(positions[start - 1].yDirAdj - target.yDirAdj) <= tolerance) {
+        start--
+    }
+    var end = charIndex + 1
+    while (end < positions.size && kotlin.math.abs(positions[end].yDirAdj - target.yDirAdj) <= tolerance) {
+        end++
+    }
+    val linePositions = positions.subList(start, end)
+    val text = linePositions.joinToString("") { it.unicode }
+    if (text.isBlank()) return null
+    val minLeft = linePositions.minOf { it.xDirAdj }
+    val maxRight = linePositions.maxOf { it.xDirAdj + it.widthDirAdj }
+    val minTop = linePositions.minOf { it.yDirAdj - it.heightDir }
+    val maxBottom = linePositions.maxOf { it.yDirAdj + it.heightDir * 0.2f }
+    return EditLine(start, end, text, RectF(minLeft, minTop, maxRight, maxBottom))
 }
 
 private fun findWordBounds(
