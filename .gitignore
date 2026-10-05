@@ -4,3 +4,6 @@ local.properties
 .gradle/
 build/
 app/build/
+
+# local diagnostic logs
+*.log
