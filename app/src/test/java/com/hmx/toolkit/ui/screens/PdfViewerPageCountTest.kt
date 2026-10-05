@@ -2,11 +2,22 @@ package com.hmx.toolkit.ui.screens
 
 import android.content.Context
 import android.net.Uri
+import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
+import org.robolectric.annotation.Config
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -46,7 +57,18 @@ class PdfViewerPageCountTest {
 
     private suspend fun loadAndAwaitLoaded(uri: Uri): PdfViewerUiState.Loaded {
         viewModel.loadPdf(context, uri)
-        val state = viewModel.uiState.first { it !is PdfViewerUiState.Loading && it !is PdfViewerUiState.Idle }
+        // Pump Robolectric's Main looper while waiting: viewModelScope runs on
+        // Dispatchers.Main, whose tasks only execute when the looper is idled.
+        // withTimeout keeps any residual hang loud (with the current state).
+        val state = withTimeout(60_000) {
+            var current: PdfViewerUiState = viewModel.uiState.value
+            while (current is PdfViewerUiState.Loading || current is PdfViewerUiState.Idle) {
+                Shadows.shadowOf(Looper.getMainLooper()).idle()
+                kotlinx.coroutines.delay(25)
+                current = viewModel.uiState.value
+            }
+            current
+        }
         assertTrue("Expected Loaded, got $state", state is PdfViewerUiState.Loaded)
         return state as PdfViewerUiState.Loaded
     }
@@ -79,7 +101,15 @@ class PdfViewerPageCountTest {
     fun `malformed input reports error not a page count`() = runBlocking {
         val bad = File(context.cacheDir, "not_a_pdf.pdf").apply { writeText("garbage") }
         viewModel.loadPdf(context, Uri.fromFile(bad))
-        val state = viewModel.uiState.first { it !is PdfViewerUiState.Loading && it !is PdfViewerUiState.Idle }
+        val state = withTimeout(60_000) {
+            var current: PdfViewerUiState = viewModel.uiState.value
+            while (current is PdfViewerUiState.Loading || current is PdfViewerUiState.Idle) {
+                Shadows.shadowOf(Looper.getMainLooper()).idle()
+                kotlinx.coroutines.delay(25)
+                current = viewModel.uiState.value
+            }
+            current
+        }
         assertTrue("Expected Error, got $state", state is PdfViewerUiState.Error)
     }
 
