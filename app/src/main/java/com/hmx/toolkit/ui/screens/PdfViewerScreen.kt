@@ -651,8 +651,15 @@ fun PdfViewerScreen(
                     // Tool drawer (hidden by default) opens/closes smoothly from the right; Pan stays permanently visible.
                     AnimatedVisibility(
                         visible = toolsDrawerOpen,
-                        enter = slideInHorizontally { it },
-                        exit = slideOutHorizontally { it }
+                        enter = slideIn(
+                            animationSpec = tween(200, easing = FastOutSlowInEasing),
+                            initialOffsetX = { IntSize(windowWidth, 0) },
+                            targetOffsetX = { IntSize(0, 0) }
+                        ),
+                        exit = slideOut(
+                            animationSpec = tween(200, easing = FastOutSlowInEasing),
+                            targetOffsetX = { IntSize(windowWidth, 0) }
+                        )
                     ) {
                         AnnotationToolbar(
                             selectedTool = selectedAnnotationTool,
