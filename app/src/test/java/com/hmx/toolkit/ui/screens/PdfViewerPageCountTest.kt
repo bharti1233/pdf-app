@@ -51,19 +51,19 @@ class PdfViewerPageCountTest {
         return state as PdfViewerUiState.Loaded
     }
 
-    @Test
+    @Test(timeout = 120000)
     fun `single page pdf reports count of one`() = runBlocking {
         val loaded = loadAndAwaitLoaded(Uri.fromFile(createPdf(1, "one_page.pdf")))
         assertEquals(1, loaded.totalPages)
     }
 
-    @Test
+    @Test(timeout = 120000)
     fun `multi page pdf reports exact count`() = runBlocking {
         val loaded = loadAndAwaitLoaded(Uri.fromFile(createPdf(7, "seven_pages.pdf")))
         assertEquals(7, loaded.totalPages)
     }
 
-    @Test
+    @Test(timeout = 120000)
     fun `reopening another pdf updates count and generation`() = runBlocking {
         val firstGen = viewModel.documentGeneration.value
         val loaded1 = loadAndAwaitLoaded(Uri.fromFile(createPdf(5, "five_pages.pdf")))
@@ -75,7 +75,7 @@ class PdfViewerPageCountTest {
         assertEquals(firstGen + 2, viewModel.documentGeneration.value)
     }
 
-    @Test
+    @Test(timeout = 120000)
     fun `malformed input reports error not a page count`() = runBlocking {
         val bad = File(context.cacheDir, "not_a_pdf.pdf").apply { writeText("garbage") }
         viewModel.loadPdf(context, Uri.fromFile(bad))
@@ -83,14 +83,14 @@ class PdfViewerPageCountTest {
         assertTrue("Expected Error, got $state", state is PdfViewerUiState.Error)
     }
 
-    @Test
+    @Test(timeout = 120000)
     fun `loadPage rejects out-of-range indices without document`() = runBlocking {
         assertEquals(null, viewModel.loadPage(-1))
         assertEquals(null, viewModel.loadPage(0))
         assertEquals(null, viewModel.loadPage(99))
     }
 
-    @Test
+    @Test(timeout = 120000)
     fun `loadPage rejects out-of-range indices with loaded document`() = runBlocking {
         val loaded = loadAndAwaitLoaded(Uri.fromFile(createPdf(3, "bounds.pdf")))
         assertEquals(3, loaded.totalPages)
