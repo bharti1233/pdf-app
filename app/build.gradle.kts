@@ -167,13 +167,6 @@ android {
             // Required so Robolectric can see merged resources/assets
             // (strings, pdfbox-android font AFMs from the AAR).
             isIncludeAndroidResources = true
-            // TEMPORARY hang diagnosis (Phase 3): log every test start so a
-            // hanging test is identifiable from CI output. Revert after.
-            unitTests.all {
-                testLogging {
-                    events("started", "failed", "skipped")
-                }
-            }
         }
     }
 
@@ -348,6 +341,13 @@ dependencies {
 
     // Fragment KTX (used by legacy viewer and other components)
     implementation("androidx.fragment:fragment-ktx:1.8.5")
+}
+// TEMPORARY hang diagnosis (Phase 3): log every test start so a hanging test
+// is identifiable from CI output. Revert after diagnosis.
+tasks.withType<org.gradle.api.tasks.testing.Test> {
+    testLogging {
+        events("started", "failed", "skipped")
+    }
 }
 dependencies {
     testImplementation("androidx.test:core-ktx:1.5.0")
