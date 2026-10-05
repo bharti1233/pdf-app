@@ -401,7 +401,12 @@ open class PdfViewerViewModel : ViewModel() {
                         throw e // Rethrow to outer catch
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable (not just Exception): PDFBox can fail malformed input
+                // with Errors (e.g. stack exhaustion on crafted streams). Any such
+                // failure must still settle the UI into Error — an unsettled load
+                // hangs observers forever. Cancellation is always rethrown.
+                if (e is CancellationException) throw e
                 Log.e("PdfViewerVM", "Error loading PDF", e)
                 _uiState.value = PdfViewerUiState.Error(e.message ?: "Failed to load PDF")
             }
