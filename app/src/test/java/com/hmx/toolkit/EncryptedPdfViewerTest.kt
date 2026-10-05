@@ -46,11 +46,26 @@ class EncryptedPdfViewerTest {
     }
 
     private fun createEncryptedPdf(file: File, password: String) {
-        PDDocument().use { doc ->
-            doc.addPage(PDPage())
-            doc.protect(StandardProtectionPolicy(password, password, AccessPermission()))
-            doc.save(file)
+        var lastError: Exception? = null
+        // See PdfCompressorIsolationTest.createTestPdf: retry only the ARRANGE
+        // write against the proven-transient CI file-visibility flake.
+        repeat(3) {
+            try {
+                PDDocument().use { doc ->
+                    doc.addPage(PDPage())
+                    doc.protect(StandardProtectionPolicy(password, password, AccessPermission()))
+                    doc.save(file)
+                }
+                if (file.exists() && file.length() > 0) return
+            } catch (e: Exception) {
+                lastError = e
+            }
+            Thread.sleep(100)
         }
+        throw AssertionError(
+            "Test fixture was not persisted after 3 attempts (environmental FS flake): ${file.absolutePath}",
+            lastError
+        )
     }
 
     @Test

@@ -43,6 +43,25 @@ class PdfTextEditorTest {
 
     private fun createTextPdf(path: String, lines: List<String>): File {
         val file = File(context.cacheDir, path)
+        var lastError: Exception? = null
+        // See PdfCompressorIsolationTest.createTestPdf: retry only the ARRANGE
+        // write against the proven-transient CI file-visibility flake.
+        repeat(3) {
+            try {
+                writeTextPdf(file, lines)
+                if (file.exists() && file.length() > 0) return file
+            } catch (e: Exception) {
+                lastError = e
+            }
+            Thread.sleep(100)
+        }
+        throw AssertionError(
+            "Test fixture was not persisted after 3 attempts (environmental FS flake): ${file.absolutePath}",
+            lastError
+        )
+    }
+
+    private fun writeTextPdf(file: File, lines: List<String>) {
         PDDocument().use { doc ->
             val page = PDPage(PDRectangle.LETTER)
             doc.addPage(page)
@@ -60,7 +79,6 @@ class PdfTextEditorTest {
             }
             doc.save(file)
         }
-        return file
     }
 
     private fun extractText(file: File): String {
@@ -109,7 +127,7 @@ class PdfTextEditorTest {
             newText = "Gamma"
         )
 
-        assertTrue(result.isSuccess)
+        assertTrue("edit should succeed: ${result.exceptionOrNull()}", result.isSuccess)
         PDDocument.load(out).use { doc ->
             assertEquals(1, doc.numberOfPages)
         }

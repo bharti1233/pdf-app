@@ -39,11 +39,25 @@ class PdfViewerPageCountTest {
 
     private fun createPdf(pages: Int, name: String): File {
         val file = File(context.cacheDir, name)
-        PDDocument().use { doc ->
-            repeat(pages) { doc.addPage(PDPage()) }
-            doc.save(file)
+        var lastError: Exception? = null
+        // See PdfCompressorIsolationTest.createTestPdf: retry only the ARRANGE
+        // write against the proven-transient CI file-visibility flake.
+        repeat(3) {
+            try {
+                PDDocument().use { doc ->
+                    repeat(pages) { doc.addPage(PDPage()) }
+                    doc.save(file)
+                }
+                if (file.exists() && file.length() > 0) return file
+            } catch (e: Exception) {
+                lastError = e
+            }
+            Thread.sleep(100)
         }
-        return file
+        throw AssertionError(
+            "Test fixture was not persisted after 3 attempts (environmental FS flake): ${file.absolutePath}",
+            lastError
+        )
     }
 
     private suspend fun loadAndAwaitLoaded(uri: Uri): PdfViewerUiState.Loaded {

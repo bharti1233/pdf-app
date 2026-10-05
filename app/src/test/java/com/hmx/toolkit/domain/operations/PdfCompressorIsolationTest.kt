@@ -46,7 +46,31 @@ class PdfCompressorIsolationTest {
             ?.toSet() ?: emptySet()
     }
 
+    /**
+     * Writes a fixture PDF and verifies it persisted. The CI worker's
+     * filesystem intermittently loses freshly-created cache files (proven by
+     * identical-shape tests passing/failing interchangeably in the same run);
+     * retry only the ARRANGE write (bounded, loud on persistent failure).
+     * Behavioral assertions elsewhere stay single-shot and strict.
+     */
     private fun createTestPdf(file: File) {
+        var lastError: Exception? = null
+        repeat(3) {
+            try {
+                writeTestPdf(file)
+                if (file.exists() && file.length() > 0) return
+            } catch (e: Exception) {
+                lastError = e
+            }
+            Thread.sleep(100)
+        }
+        throw AssertionError(
+            "Test fixture was not persisted after 3 attempts (environmental FS flake): ${file.absolutePath}",
+            lastError
+        )
+    }
+
+    private fun writeTestPdf(file: File) {
         val doc = PDDocument()
         val page = PDPage()
         doc.addPage(page)
