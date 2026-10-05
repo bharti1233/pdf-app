@@ -26,7 +26,6 @@ import java.io.File
 @Config(sdk = [33])
 class EncryptedPdfViewerTest {
 
-    private lateinit var testDir: File
     private lateinit var simpleEncrypted: File
     private lateinit var unicodeEncrypted: File
 
@@ -35,11 +34,16 @@ class EncryptedPdfViewerTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         PDFBoxResourceLoader.init(context)
         // Generate real encrypted fixtures at test time (no checked-in binaries).
-        testDir = File(context.cacheDir, "encrypted_fixtures").apply { mkdirs() }
-        simpleEncrypted = File(testDir, "encrypted_simple.pdf")
-        unicodeEncrypted = File(testDir, "encrypted_unicode_pwd.pdf")
+        // Written directly to cacheDir root like the other PDF tests: avoids
+        // depending on a freshly-created subdirectory existing at save time.
+        context.cacheDir.mkdirs()
+        simpleEncrypted = File(context.cacheDir, "encrypted_simple.pdf")
+        unicodeEncrypted = File(context.cacheDir, "encrypted_unicode_pwd.pdf")
         createEncryptedPdf(simpleEncrypted, "secret123")
         createEncryptedPdf(unicodeEncrypted, "pässwörd123")
+        check(simpleEncrypted.exists() && unicodeEncrypted.exists()) {
+            "Test fixtures were not created"
+        }
     }
 
     private fun createEncryptedPdf(file: File, password: String) {
