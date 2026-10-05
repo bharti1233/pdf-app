@@ -56,7 +56,8 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle.kts') }}
 
       - name: Run unit tests
-        run: chmod +x gradlew && ./gradlew testFdroidDebugUnitTest
+        # TEMPORARY single-method isolation (Phase 3): does malformed-input hang alone?
+        run: chmod +x gradlew && ./gradlew testFdroidDebugUnitTest --tests "com.hmx.toolkit.ui.screens.PdfViewerPageCountTest.*malformed*"
 
       - name: Upload test results
         if: always()
